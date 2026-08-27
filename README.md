@@ -4,9 +4,68 @@ IP 版权检测、内容权属分析与合规审查资料库。
 
 目录说明
 
-- docs：专题记录、方案整理与结论。
-- references：公开资料、规范与来源索引。
-- examples：不含敏感信息的示例与验证材料。
+- docs：Python 语言、并发和后端工程专题记录。
+- examples：可直接运行的基础、函数、面向对象、并发和排错实验。
+- src/ip_copyright_inspector：最小文本相似度检测 API。
+- tests：相似度、数据模型、HTTP 接口和数据库事务测试。
+- references：Python 与后端组件的官方资料索引。
+- scripts：笔记格式检查工具。
+
+推荐阅读顺序
+
+1. docs/00-java-to-python-map.md
+2. docs/01-python-basics.md
+3. docs/02-functions-pythonic.md
+4. docs/03-object-oriented.md
+5. docs/04-concurrency.md
+6. docs/05-backend-engineering.md
+7. docs/06-practice-roadmap.md
+8. docs/07-debugging-pitfalls.md
+9. docs/08-memory-cards.md
+
+直接运行标准库实验
+
+这些脚本只需要 Python 3.11 或更高版本：
+
+```powershell
+python examples\basics_lab.py
+python examples\functions_lab.py
+python examples\oop_lab.py
+python examples\concurrency_lab.py
+python examples\pitfalls_lab.py
+```
+
+也可以一次运行全部标准库实验：
+
+```powershell
+python scripts\run_all_labs.py
+```
+
+使用 uv 运行后端示例
+
+```powershell
+uv sync --locked
+uv run pytest
+uv run uvicorn ip_copyright_inspector.main:app --reload
+```
+
+启动后访问 http://127.0.0.1:8000/docs，可在自动生成的接口页面提交两段文本进行比较。
+
+只有 Python 和 pip 时
+
+```powershell
+py -m venv .venv
+.\.venv\Scripts\Activate.ps1
+python -m pip install -e ".[dev]"
+python -m pytest
+python -m uvicorn ip_copyright_inspector.main:app --reload
+```
+
+运行笔记格式检查
+
+```powershell
+python scripts\check_note_format.py
+```
 
 内容约定
 
@@ -16,6 +75,7 @@ IP 版权检测、内容权属分析与合规审查资料库。
 - 不提交账号凭据、令牌、个人隐私或组织内部资料。
 - 所有笔记使用普通正文排版，不使用 Markdown 大标题或加粗文字模拟标题。
 - 详细排版规则见 note-format.md。
+- 文本相似度结果只是技术指标，不构成版权归属、授权范围或侵权结论。
 
 使用方式
 

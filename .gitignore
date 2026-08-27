@@ -36,6 +36,11 @@ node_modules/
 venv/
 __pycache__/
 *.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
 
 # Local databases and archives
 *.db
@@ -44,4 +49,3 @@ __pycache__/
 *.zip
 *.7z
 *.rar
-

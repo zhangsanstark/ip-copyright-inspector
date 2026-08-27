@@ -1,0 +1,41 @@
+[build-system]
+requires = ["hatchling>=1.27"]
+build-backend = "hatchling.build"
+
+[project]
+name = "ip-copyright-inspector"
+version = "0.1.0"
+description = "A small text-similarity screening API for IP review exercises"
+requires-python = ">=3.11"
+dependencies = [
+    "aiosqlite>=0.20,<1.0",
+    "fastapi>=0.115,<1.0",
+    "pydantic>=2.10,<3.0",
+    "sqlalchemy[asyncio]>=2.0,<3.0",
+    "uvicorn[standard]>=0.34,<1.0",
+]
+
+[project.optional-dependencies]
+# pip 还不能统一读取所有环境中的 PEP 735 依赖组，因此保留 dev extra。
+# 修改开发依赖时，要和下面的 dependency-groups.dev 一起更新。
+dev = [
+    "httpx2>=2.12,<3.0",
+    "pytest>=8.3,<10.0",
+]
+
+[dependency-groups]
+dev = [
+    "httpx2>=2.12,<3.0",
+    "pytest>=8.3,<10.0",
+]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/ip_copyright_inspector"]
+
+[tool.poetry]
+packages = [{ include = "ip_copyright_inspector", from = "src" }]
+
+[tool.pytest.ini_options]
+addopts = "-q"
+pythonpath = ["src"]
+testpaths = ["tests"]
