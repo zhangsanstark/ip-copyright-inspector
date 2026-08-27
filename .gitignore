@@ -1,0 +1,47 @@
+# Credentials and local configuration
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.p12
+*.pfx
+credentials.json
+secrets.*
+
+# Editors and operating systems
+.idea/
+.vscode/
+*.swp
+*.swo
+.DS_Store
+Thumbs.db
+Desktop.ini
+
+# Temporary and generated files
+*.tmp
+*.temp
+*.log
+*.bak
+*.cache
+~$*
+temp/
+tmp/
+dist/
+build/
+
+# Runtime and dependency folders
+node_modules/
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+
+# Local databases and archives
+*.db
+*.sqlite
+*.sqlite3
+*.zip
+*.7z
+*.rar
+
