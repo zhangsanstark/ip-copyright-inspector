@@ -13,6 +13,8 @@
 - 06-practice-roadmap.md：从单文件练习到最小 API 的分阶段任务。
 - 07-debugging-pitfalls.md：常见错误、反例、修复方法和排错顺序。
 - 08-memory-cards.md：适合快速复习的一问一答卡片。
+- 09-driving-license-subject-four.md：科目四安全逻辑、易错数字、场景判断和应急处置。
+- 10-driving-license-subject-four-review.md：科目四速记卡、常见陷阱和自测题。
 
 建议文件名使用小写英文与连字符，例如：
 

@@ -13,5 +13,6 @@
 
 - python-language-sources.md：Python 语言、对象模型和并发官方文档。
 - python-backend-sources.md：Pydantic、FastAPI、SQLAlchemy、uv、Poetry、pytest 和部署组件官方文档。
+- driving-license-subject-four-sources.md：科目四公开攻略样本、现行法规和安全资料核对记录。
 
 本目录中的记录统一使用普通正文排版，不使用 Markdown 大标题或加粗文字模拟标题。

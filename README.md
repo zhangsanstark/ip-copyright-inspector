@@ -4,11 +4,11 @@ IP 版权检测、内容权属分析与合规审查资料库。
 
 目录说明
 
-- docs：Python 语言、并发和后端工程专题记录。
+- docs：Python、后端工程和安全驾驶专题记录。
 - examples：可直接运行的基础、函数、面向对象、并发和排错实验。
 - src/ip_copyright_inspector：最小文本相似度检测 API。
 - tests：相似度、数据模型、HTTP 接口和数据库事务测试。
-- references：Python 与后端组件的官方资料索引。
+- references：语言组件、法规和公开资料索引。
 - scripts：笔记格式检查工具。
 
 推荐阅读顺序
@@ -22,6 +22,8 @@ IP 版权检测、内容权属分析与合规审查资料库。
 7. docs/06-practice-roadmap.md
 8. docs/07-debugging-pitfalls.md
 9. docs/08-memory-cards.md
+10. docs/09-driving-license-subject-four.md
+11. docs/10-driving-license-subject-four-review.md
 
 直接运行标准库实验
 
