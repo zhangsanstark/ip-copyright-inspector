@@ -4,14 +4,19 @@ IP 版权检测、内容权属分析与合规审查资料库。
 
 1）目录说明
 
-- docs：Python、后端工程和安全驾驶专题记录。
+- docs/handbook：25 章 Python 详细手册、完整练习答案与逐章运行入口。
+- docs：原有 Python、后端工程回看笔记和独立的安全驾驶专题记录。
 - examples：可直接运行的基础、函数、面向对象、并发和排错实验。
 - src/ip_copyright_inspector：最小文本相似度检测 API。
 - tests：相似度、数据模型、HTTP 接口和数据库事务测试。
 - references：语言组件、法规和公开资料索引。
-- scripts：笔记格式检查工具。
+- scripts：笔记格式检查、手册示例验证与独立脚本导出工具。
 
 2）推荐阅读顺序
+
+详细正文从 [手册总目录](docs/handbook/README.md) 开始，按基础、函数、对象、并发、后端与实战分篇。每章都包含逐步解释、多个例子和完整练习答案。
+
+如果只想回看已有专题，仍可按下面顺序：
 
 1. docs/00-java-to-python-map.md
 2. docs/01-python-basics.md
@@ -26,6 +31,15 @@ IP 版权检测、内容权属分析与合规审查资料库。
 11. docs/10-driving-license-subject-four-review.md
 
 3）直接运行标准库实验
+
+手册可以按章运行，也可以导出成独立文件后修改。安装项目环境后，例如：
+
+```powershell
+uv run python scripts/check_handbook_examples.py --chapter 08 --show-output
+uv run python scripts/check_handbook_examples.py --chapter 08 --export .practice/08
+```
+
+完整运行与安装说明见 [手册使用方式](docs/handbook/README.md)。需要外部服务的示意不会自动执行。
 
 这些脚本只需要 Python 3.11 或更高版本：
 

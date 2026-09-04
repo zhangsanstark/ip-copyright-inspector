@@ -14,3 +14,15 @@
 2）说明文字的写法
 
 使用普通正文和知识点编号，不使用 Markdown 标题或加粗文字模拟标题。具体见 [排版规则](../note-format.md)。
+
+3）手册中的独立例子
+
+[详细手册](../docs/handbook/README.md) 每章的完整 Python 例子可以独立执行，也可以导出后自己修改：
+
+```powershell
+uv run python scripts/check_handbook_examples.py --chapter 08 --show-output
+uv run python scripts/check_handbook_examples.py --chapter 08 --export .practice/08
+uv run python .practice/08/hb08_reduce_first.py
+```
+
+导出只包含明确标记为 runnable 的完整块，不覆盖已存在脚本。后端章节需要项目依赖；片段、选装服务、部署命令不会自动运行。旧的六个实验脚本仍然可以单独使用。

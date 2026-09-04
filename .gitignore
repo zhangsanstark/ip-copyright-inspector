@@ -41,6 +41,7 @@ __pycache__/
 .ruff_cache/
 .coverage
 htmlcov/
+.practice/
 
 # Local databases and archives
 *.db

@@ -9,7 +9,10 @@ from pathlib import Path
 
 
 ROOT = Path(__file__).resolve().parents[1]
-SKIPPED_PARTS = {".git", ".venv", "node_modules", "dist", "build"}
+SKIPPED_PARTS = {
+    ".git", ".venv", "node_modules", "dist", "build", ".pytest_cache",
+    ".mypy_cache", ".ruff_cache", "__pycache__", ".practice",
+}
 ATX_HEADING = re.compile(r"^\s{0,3}#{1,6}(?:\s|$)")
 HTML_HEADING = re.compile(r"<\s*h[1-6](?:\s|>)", re.IGNORECASE)
 SETEXT_MARK = re.compile(r"^\s*(?:=+|-+)\s*$")
