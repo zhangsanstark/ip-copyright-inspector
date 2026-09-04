@@ -2,7 +2,7 @@ IP Copyright Inspector
 
 IP 版权检测、内容权属分析与合规审查资料库。
 
-目录说明
+1）目录说明
 
 - docs：Python、后端工程和安全驾驶专题记录。
 - examples：可直接运行的基础、函数、面向对象、并发和排错实验。
@@ -11,7 +11,7 @@ IP 版权检测、内容权属分析与合规审查资料库。
 - references：语言组件、法规和公开资料索引。
 - scripts：笔记格式检查工具。
 
-推荐阅读顺序
+2）推荐阅读顺序
 
 1. docs/00-java-to-python-map.md
 2. docs/01-python-basics.md
@@ -25,7 +25,7 @@ IP 版权检测、内容权属分析与合规审查资料库。
 10. docs/09-driving-license-subject-four.md
 11. docs/10-driving-license-subject-four-review.md
 
-直接运行标准库实验
+3）直接运行标准库实验
 
 这些脚本只需要 Python 3.11 或更高版本：
 
@@ -43,7 +43,7 @@ python examples\pitfalls_lab.py
 python scripts\run_all_labs.py
 ```
 
-使用 uv 运行后端示例
+4）使用 uv 运行后端示例
 
 ```powershell
 uv sync --locked
@@ -53,7 +53,7 @@ uv run uvicorn ip_copyright_inspector.main:app --reload
 
 启动后访问 http://127.0.0.1:8000/docs，可在自动生成的接口页面提交两段文本进行比较。
 
-只有 Python 和 pip 时
+5）只有 Python 和 pip 时
 
 ```powershell
 py -m venv .venv
@@ -63,22 +63,22 @@ python -m pytest
 python -m uvicorn ip_copyright_inspector.main:app --reload
 ```
 
-运行笔记格式检查
+6）运行笔记格式检查
 
 ```powershell
 python scripts\check_note_format.py
 ```
 
-内容约定
+7）内容约定
 
 - 每个主题使用独立的 Markdown 文件。
 - 引用外部内容时记录标题、作者、链接与访问日期。
 - 明确区分事实、推断与待验证事项。
 - 不提交账号凭据、令牌、个人隐私或组织内部资料。
-- 所有笔记使用普通正文排版，不使用 Markdown 大标题或加粗文字模拟标题。
-- 详细排版规则见 note-format.md。
+- 所有笔记使用普通正文，按 `1）`、`2）` 区分知识点，按 `2.1`、`2.2` 细分；不使用 Markdown 标题或加粗文字模拟标题。
+- 详细排版规则见 [note-format.md](note-format.md)。
 - 文本相似度结果只是技术指标，不构成版权归属、授权范围或侵权结论。
 
-使用方式
+8）使用方式
 
 克隆仓库后，可直接使用任意 Markdown 编辑器维护内容。
