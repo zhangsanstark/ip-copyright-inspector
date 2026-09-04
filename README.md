@@ -32,6 +32,7 @@ IP 版权检测、内容权属分析与合规审查资料库。
 ```powershell
 python examples\basics_lab.py
 python examples\functions_lab.py
+python examples\higher_order_lab.py
 python examples\oop_lab.py
 python examples\concurrency_lab.py
 python examples\pitfalls_lab.py

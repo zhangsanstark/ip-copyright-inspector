@@ -12,6 +12,7 @@ ROOT = Path(__file__).resolve().parents[1]
 LABS = [
     ROOT / "examples" / "basics_lab.py",
     ROOT / "examples" / "functions_lab.py",
+    ROOT / "examples" / "higher_order_lab.py",
     ROOT / "examples" / "oop_lab.py",
     ROOT / "examples" / "concurrency_lab.py",
     ROOT / "examples" / "pitfalls_lab.py",

@@ -44,3 +44,15 @@ Python 语言官方资料
 - [异常与错误](https://docs.python.org/3/tutorial/errors.html)：异常传播、捕获和自定义异常。
 - [pdb 调试器](https://docs.python.org/3/library/pdb.html)：breakpoint、单步执行和查看调用栈。
 - [unittest](https://docs.python.org/3/library/unittest.html)：Python 标准库自带的测试框架。
+
+---
+
+6）高阶函数细讲的版本核对
+
+补充核对日期：2026-09-03。以下固定在 Python 3.11 文档，便于与仓库最低运行版本一致；正文的小数据示例另有实际运行验证。
+
+- [functools.reduce](https://docs.python.org/3.11/library/functools.html#functools.reduce)：从左到右累计、两个调用参数、可选初值，以及空输入和单元素的处理。
+- [内置 map](https://docs.python.org/3.11/library/functions.html#map)：按需产生转换结果，多组输入时按最短结束。
+- [内置 filter](https://docs.python.org/3.11/library/functions.html#filter)：按判断保留原元素，以及函数为 None 时的真假筛选。
+- [排序指南](https://docs.python.org/3.11/howto/sorting.html)：key 的单元素输入、一次计算和稳定排序。
+- [itertools.accumulate](https://docs.python.org/3.11/library/itertools.html#itertools.accumulate)：逐次产生中间累计结果，与 reduce 的最终结果作对照。

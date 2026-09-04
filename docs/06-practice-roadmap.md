@@ -25,6 +25,16 @@
 
 记住：先同步，再测试，后启动。环境没确认好，先别急着改代码。
 
+1.3 第一轮先做到什么程度，不要一上来改所有文件
+
+先预测：执行 `uv sync` 后，当前终端直接输入 `python` 是否一定变成项目里的 Python？答案是不一定；`uv sync` 准备环境，不会自动替你激活当前终端。
+
+操作：在仓库根目录运行 `uv run python -c "import sys; print(sys.executable)"`。核对路径是否指向项目 `.venv`，再运行 `uv run pytest`。测试先跑通，才有条件判断后面是不是自己的改动引入了问题。
+
+接着只做一个固定请求：`left_text="abcd"`、`right_text="abce"`、`ngram_size=2`。参考答案是分数 0.5、交集 2、并集 4。如果页面能打开却返回 422，先看字段；如果 503，先看数据库；不要遇到任何错误都重新安装整个环境。
+
+不想先处理启动端口，可以先执行 `05-backend-engineering.md` 第 4.6 点的完整 TestClient 实验。它已经准备临时数据库，能直接核对成功请求、错误请求和保存结果。
+
 2）先不用框架，手算一次相似度
 
 2.1 用集合把公式算明白
@@ -54,6 +64,30 @@ uv run python -c "from ip_copyright_inspector.similarity import compare_texts; p
 
 记住：切片成集合，交集除并集；算的是重合，不是裁决。
 
+2.3 给自己一份能核对的中间结果
+
+先预测 `abcd` 和 `abce` 在 `n=1、2、3、4` 时分别有哪些片段。别只猜哪个分数更大，写出交集和并集数量。
+
+下面整段可以保存成单独脚本，用 `uv run python 文件名.py` 运行。它直接调用仓库函数，`sorted()` 只是为了让集合打印顺序固定，不改变算法。
+
+```python
+# runnable: ngram_answers
+from ip_copyright_inspector.similarity import character_ngrams, compare_texts
+
+for size in range(1, 5):
+    left = sorted(character_ngrams("abcd", size))
+    right = sorted(character_ngrams("abce", size))
+    result = compare_texts("abcd", "abce", ngram_size=size)
+    print(size, left, right, result.intersection_count, result.union_count, round(result.score, 6))
+
+assert compare_texts("aaaa", "aa", ngram_size=2).score == 1.0
+assert compare_texts("aaaa", "aa", ngram_size=3).score == 0.0
+```
+
+核对答案：`n=1` 是交集 3、并集 5、分数 0.6；`n=2` 是 2、4、0.5；`n=3` 是 1、3、约 0.333333；`n=4` 是 0、2、0。
+
+最后两个断言为什么差这么多？`n=2` 时，`aaaa` 虽然能切出三次 `aa`，放进集合后只剩 `{aa}`，和右边一样。`n=3` 时，左边是 `{aaa}`，右边因为太短采用兜底 `{aa}`，两边没有共同元素。把这一步说清楚，就不是只记住“集合会去重”了。
+
 3）补类型提示，看看它能帮什么、不能帮什么
 
 3.1 先描述清楚输入和输出
@@ -74,6 +108,40 @@ uv run python -c "from ip_copyright_inspector.similarity import compare_texts; p
 完成标志：故意传错类型时，能解释为什么注解本身不一定拦截调用，以及外部数据应该在哪一层接受校验。
 
 记住：类型提示能提醒，运行时入口还得另外检查。
+
+3.3 先照着写一份完整实现，再换一个实现类
+
+预测：下面的 `JaccardStrategy` 没有继承 `SimilarityStrategy`，能不能传给 `evaluate`？先运行，再检查它有没有协议要求的同名方法。
+
+```python
+# runnable: strategy_answer
+from typing import Protocol
+from ip_copyright_inspector.similarity import compare_texts
+
+
+class SimilarityStrategy(Protocol):
+    def compare(self, left: str, right: str) -> float: ...
+
+
+class JaccardStrategy:
+    def compare(self, left: str, right: str) -> float:
+        return compare_texts(left, right, ngram_size=2).score
+
+
+def evaluate(strategy: SimilarityStrategy, left: str, right: str) -> float:
+    return strategy.compare(left, right)
+
+
+score = evaluate(JaccardStrategy(), "abcd", "abce")
+print(score)
+assert score == 0.5
+```
+
+核对：输出 0.5。运行能成功，是因为对象确实有可调用的 `compare`；协议负责向静态检查器说明这个要求，不会在调用时自动弹出校验器。
+
+参考答案提示：`set[str]` 不保留重复次数，`list[str]` 会；不可变 dataclass 让计算结果的字段固定、不容易被后续误改；`str | None` 只决定能否接受空值，不决定参数能否省略；`Any` 放松检查，`object` 则要求使用具体能力前确认类型。
+
+下一步不用碰 API，另写一个 `ExactMatchStrategy`，完全相同返回 1.0，否则返回 0.0，再交给同一个 `evaluate`。这时你只替换了“怎么算”，没有重写调用流程。
 
 4）用 Pydantic 把输入错误拦在计算之前
 
@@ -102,6 +170,36 @@ print(CompareRequest.model_json_schema())
 完成标志：给你一条规则，你能选出该放进 `Field`、字段验证器还是模型验证器；检查通过的路径都记得返回值。
 
 记住：简单范围写进 `Field`，额外规则写验证器，成功别忘返回值。
+
+4.3 每次只改一个输入，并写下预期错误
+
+先用 `05-backend-engineering.md` 第 3.4 点的完整循环运行七组输入，再把结果遮住，独立回答：
+
+- 不传 `ngram_size`：得到 3，因为字段有默认值。
+- 传 `ngram_size=None`：失败，None 不是“没传”，字段也没允许空值。
+- 传 `ngram_size="2"`：默认模式下转换成整数 2；同一次调用加 `strict=True` 后失败。
+- 传纯空白左文本：先去两端空白，长度变成 0，触发 `min_length`，不必等自定义验证器报错。
+- 多传 `ngram_szie`：触发额外字段错误；模型不会猜测你其实想写 `ngram_size`。
+
+下面只验证“普通模式与严格模式”的差别，不修改仓库模型：
+
+```python
+# runnable: strict_input_answer
+from pydantic import ValidationError
+from ip_copyright_inspector.schemas import CompareRequest
+
+payload = {"left_text": "abcd", "right_text": "abce", "ngram_size": "2"}
+normal = CompareRequest.model_validate(payload)
+print("normal:", normal.ngram_size, type(normal.ngram_size).__name__)
+try:
+    CompareRequest.model_validate(payload, strict=True)
+except ValidationError as error:
+    print("strict:", error.errors()[0]["type"])
+else:
+    raise AssertionError("strict mode should reject this string")
+```
+
+预期为 `normal: 2 int` 和 `strict: int_type`。若要完成 UUID 扩展题，先在单独脚本定义一个继承 `CompareRequest` 的新模型，添加 `request_id: UUID | None = None`，记得 `from uuid import UUID`。先证明省略、合法 UUID 和非法字符串三种输入的行为，再考虑改正式接口。
 
 5）看清 FastAPI 收到了什么，又返回了什么
 
@@ -137,6 +235,22 @@ Invoke-RestMethod `
 
 记住：路由安排处理流程，状态码告诉调用方这次到底成没成。
 
+5.3 不要只看“页面有返回”，把每种分支都核对
+
+以 `05-backend-engineering.md` 第 4.6 点 TestClient 实验为起点，每次只修改 payload 的一项：
+
+| 操作 | 预期状态与结果 | 应该检查的原因 |
+| --- | --- | --- |
+| `abcd` / `abce`，`n=2` | 201，分数 0.5，新增一条记录 | 模型、算法、事务都走成功路径 |
+| 删除 `ngram_size` 字段 | 201，默认 `n=3`，分数约 1/3 | 默认值实际改变了切片长度 |
+| `ngram_size=9` | 422，不新增记录 | 模型在计算前拒绝输入 |
+| 左文本只包含空白 | 422，不新增记录 | 接口不接受空文本，即使库函数对空值另有规则 |
+| 两段文本完全相同 | 201，分数 1.0 | 当前业务规则允许完全相同，不能擅自当成错误 |
+
+数据库失败不要靠删目录、改共享数据库口令来模拟。仓库已有可重复的失败测试，在根目录运行 `uv run pytest tests/test_api.py -k persistence_failure -q`：它分别让 `flush` 和 `commit` 抛异常，检查是否回滚并返回 503。
+
+参考答案提示：400 表示请求存在一般性问题，404 表示目标未找到，422 用在本例的请求校验失败，500 表示服务端未正确处理的内部错误，503 用于本例的保存失败。不是每个状态都已经有一个专门路由，也不是所有项目都必须用同一套错误划分。
+
 6）亲眼看看异步等待和阻塞的区别
 
 6.1 同样等一秒，别的请求还能不能继续
@@ -153,6 +267,46 @@ Invoke-RestMethod `
 完成标志：看一段异步代码，能指出哪个调用可能把事件循环堵住；能区分“轮流推进多个任务”的并发、“同时执行”的并行，以及异步等待机制。
 
 记住：异步等待时可以让别的任务继续，CPU 重活不会因为 `async def` 自动变快。
+
+6.3 先在小脚本里看时间线，再改路由
+
+先预测：三个任务各等 0.05 秒，一起交给 `gather()` 后，总耗时接近一份等待，还是三份等待？关键不在函数有没有写 `async`，而在等待时有没有把控制权交回去。
+
+```python
+# runnable: waiting_answer
+import asyncio
+import time
+
+
+async def wait_async(number):
+    await asyncio.sleep(0.05)
+    return number
+
+
+async def wait_blocking(number):
+    time.sleep(0.05)
+    return number
+
+
+async def measure(worker):
+    started = time.perf_counter()
+    result = await asyncio.gather(*(worker(i) for i in range(3)))
+    print(worker.__name__, result, round(time.perf_counter() - started, 3))
+    assert result == [0, 1, 2]
+
+
+async def main():
+    await measure(wait_async)
+    await measure(wait_blocking)
+
+
+if __name__ == "__main__":
+    asyncio.run(main())
+```
+
+一般会看到异步版本约 0.05 秒，阻塞版本约 0.15 秒；系统调度会影响数字，所以不把这两个时长写成严格断言。异步版本的三个任务能重叠等待；阻塞版本第一个任务睡觉时，事件循环没法切到第二个任务。
+
+这证明的是“等待能否重叠”，不是 CPU 运算自动并行。核对这点以后，再回到路由检查数据库驱动、HTTP 客户端和 `sleep` 的具体版本，才能定位真正的阻塞点。
 
 7）跟着一条记录，看懂数据库事务
 
@@ -172,6 +326,20 @@ Invoke-RestMethod `
 完成标志：每个请求独立使用会话，并发子任务不共享 `AsyncSession`；事务成功才提交，失败明确回滚；保存的仍是计算信息，不是原文。
 
 记住：`flush` 发 SQL，`commit` 才提交，`refresh` 重新查；会话不并发共享。
+
+7.3 用已有的完整脚本做三次改动
+
+先运行 `05-backend-engineering.md` 第 5.6 点事务实验，确认看到：新对象没 id，flush 后有 id，回滚后查到 0 条，第二次提交后换会话仍能查到分数 0.5。
+
+接着在你自己的实验副本中，一次只做一个改动：
+
+- 把第二次 `commit()` 改成 `rollback()`。预测换会话查询会得到 `None`，原来的“存在”断言会失败；这正好说明 flush 不是提交。
+- 把第一段 `flush()` 去掉，在 `add()` 后执行 `await session.execute(select(ComparisonRecord))`。预测 ORM 查询前自动 flush，主键可能已填好；仍然要提交才算这次事务完成。
+- 在成功提交后执行 `await session.refresh(record)`。可以给 `create_async_engine` 增加 `echo=True` 看 SQL：刷新会发 SELECT，不是再生成一次主键。日志可能包含 SQL 参数，只用无敏感内容的示例。
+
+查询最近十条的参考写法是在已有会话里使用 `select(ComparisonRecord).order_by(ComparisonRecord.created_at.desc(), ComparisonRecord.id.desc()).limit(10)`，再 `await session.execute(...)`、`result.scalars().all()`。加 id 是为了创建时间相同时有明确的先后顺序。
+
+索引题不要先背答案：按时间排序常查最近记录，就分析时间相关索引；按分数区间筛选才考虑分数索引。索引会增加写入维护成本，不是看到一个字段就加一个。
 
 8）把正常、边界和失败都写进测试
 
@@ -195,6 +363,32 @@ Invoke-RestMethod `
 完成标志：同一个测试能反复运行；换个顺序也能通过；不使用生产地址，不共享开发数据库。
 
 记住：测试彼此独立，输入覆盖边界，失败原因看得明白。
+
+8.3 先把手算结果写成可重复检查
+
+把下面代码保存成你自己的 `test_compare_example.py`，从仓库根目录运行 `uv run pytest test_compare_example.py -q`。也能直接当脚本执行；它不创建数据库。
+
+```python
+# runnable: parametrize_answer
+import pytest
+from ip_copyright_inspector.similarity import compare_texts
+
+
+@pytest.mark.parametrize(("size", "expected"), [(1, 0.6), (2, 0.5), (3, 1 / 3), (4, 0.0)])
+def test_score_by_ngram_size(size, expected):
+    result = compare_texts("abcd", "abce", ngram_size=size)
+    assert result.score == pytest.approx(expected)
+
+
+if __name__ == "__main__":
+    for size, expected in [(1, 0.6), (2, 0.5), (3, 1 / 3), (4, 0.0)]:
+        test_score_by_ngram_size(size, expected)
+    print("four cases passed")
+```
+
+先预测会产生几个用例，再运行；pytest 模式下是四个。把 `n=2` 的预期值故意改成 0.8，读清失败信息里 expected 与 obtained 的差异，再恢复 0.5。这个动作让你练的是“用测试发现错误”，不是追求屏幕永远全绿。
+
+下一步再补失败输入，例如 `ngram_size=0` 应抛 `ValueError`。参考结构是 `with pytest.raises(ValueError): compare_texts("abcd", "abce", ngram_size=0)`；不要拿 HTTP 422 去测试纯函数，因为这一层还没有 HTTP。
 
 9）只凭仓库内容，还原一套运行环境
 
@@ -233,6 +427,14 @@ poetry show --tree
 
 记住：范围说可以选谁，锁文件说这次选了谁，虚拟环境不进仓库。
 
+9.3 做一次环境定位，不靠猜包装到哪了
+
+预测：项目依赖装好后，运行系统里的 pytest 为什么仍可能提示找不到包？因为运行程序的 Python 和安装包的 Python 可能不是同一个。
+
+操作：分别查看 `python -c "import sys; print(sys.executable)"` 与 `uv run python -c "import sys; print(sys.executable)"`。路径可以不同；后者应定位到项目环境。再用 `uv tree` 找到 pytest 与运行依赖的位置，对照 `pyproject.toml` 看它们在哪一组。
+
+参考答案：想按已提交的版本清单安装，用 `uv sync --locked`；准备更新依赖解析结果，才有理由修改约束并生成新的锁文件。不要为了“重装试试”每次都随手更新锁文件，那会把环境排错和版本升级混在一起。
+
 10）从“能启动”继续走到“知道怎么部署”
 
 10.1 先看懂启动参数
@@ -259,6 +461,14 @@ uv run uvicorn ip_copyright_inspector.main:app --reload
 
 记住：镜像是模板，容器是实例，真正执行代码的是进程。
 
+10.3 把启动命令拆成几个能回答的问题
+
+对于 `uv run uvicorn ip_copyright_inspector.main:app --host 127.0.0.1 --port 8001`，逐段核对：uv 选项目环境；uvicorn 启动服务器；冒号左侧找到 Python 模块，右侧取出 `app`；host 决定监听接口；port 决定监听端口。
+
+操作后访问 `http://127.0.0.1:8001/health`，参考响应是 `{"status":"ok"}`。访问 8000 失败不一定是代码坏了，可能只是你这次启动在 8001。先关闭当前服务器再试另一条启动命令，避免把端口占用误认为业务错误。
+
+容器题先做到三项可核对结果：没有把本机 `.venv` 和本地数据库复制进镜像；进程不是 root；没有把数据库口令写入镜像。镜像构建时可以自行创建虚拟环境并安装依赖，不能把它和复制本机环境混为一谈。至于“能否接真实流量”，还得另查端口发布、入口认证、数据库容量和持久化存储，不能靠 `/health` 返回 ok 一项包办。
+
 11）从演示代码走向真实服务，还缺哪些事
 
 11.1 先补出问题时损失最大的部分
@@ -280,6 +490,14 @@ uv run uvicorn ip_copyright_inspector.main:app --reload
 
 也就是补齐确定的预处理、版本记录、标注数据、指标、阈值来源和回归测试，并保留明确的“这不是法律结论”说明。
 
+11.3 用一条失败故事，把待办变成明确要求
+
+先选“同一请求因网络超时重试”这一种场景，不必一次补所有工程能力。预测：当前服务第一次已经提交、响应却没被客户端收到，第二次重试可能怎样？参考答案是可能新增第二条记录；它没有幂等键，不能自动知道这是同一次业务请求。
+
+把改进要求写具体：由谁生成请求标识、重复标识如何查已有结果、两次并发请求怎样避免都插入、哪些字段需要唯一约束、失败时返回什么。先把这些问题讲清再写代码，比单独加一个 `request_id` 字段更接近真正解决问题。
+
+再做阈值题：准备几组人工确认过的相同、改写、不相关文本，记录每组分数，分别数误报和漏报。参考答案不应是一个凭感觉挑的“神奇阈值”，而是一份说明“在这批样本上，这个阈值会错哪些情况”的记录。
+
 12）最后做一个贯穿整条链路的小改动
 
 12.1 接口接收算法版本，并把版本保存、返回
@@ -299,3 +517,17 @@ uv run uvicorn ip_copyright_inspector.main:app --reload
 从 JSON 进入开始，依次说明：Pydantic 在哪里校验，纯函数在哪里计算，SQLAlchemy 怎样提交事务，响应模型怎样整理结果，Uvicorn 怎样把 HTTP 响应发出去。每一步都说出负责的文件或对象。
 
 讲到卡住的地方，就回到对应编号再跑一次。不必复述术语；能说清“数据从哪里来、谁处理、失败怎么办、最后去哪里”，这条链路就串起来了。
+
+12.3 综合改动按什么顺序下手
+
+先写预期：不传版本名仍走旧算法；传支持的版本正常返回；传未知版本明确失败；数据库与响应都能看见最终采用的版本。不要先往三个文件里随意加一个同名字段，再想怎么拼起来。
+
+建议在自己的练习副本按以下顺序动手：
+
+- 在输入模型定义支持的版本及默认值，先测省略、合法、未知三种输入。
+- 让计算入口明确接收版本或选择对应策略；旧版本的已有分数测试必须保持通过。
+- 给数据库增加保存版本的字段与迁移；旧记录填什么默认值也要提前决定。
+- 在路由把输入选择的版本传给计算，再把实际使用版本写入记录和响应，不只在最后返回时随手补个字符串。
+- 写集成测试：发请求，拿到记录编号，查询临时数据库，逐项比对版本、分数和响应。
+
+参考答案提示：如果目前其实只有一种算法，先限制唯一合法版本，比接受任意版本名却始终运行同一算法更诚实。完成以后，从响应中的版本往回追到数据库、路由、模型，每一处都应该能解释它来自哪里。

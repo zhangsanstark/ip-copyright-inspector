@@ -29,6 +29,64 @@
 
 `AsyncSession` 可以先理解成“这一次数据库操作的负责人”：它记住待写入的对象，执行 SQL，控制提交和回滚。这和 JPA 的 EntityManager 有相似之处，但不能照搬 Spring 代理事务或生命周期的细节，第 5 点会展开。
 
+1.3 跟住一份具体输入，看数据每一步变成什么
+
+先用一个能手算的请求：左边是 `"  AB CD  "`，右边是 `"abce"`，`ngram_size` 故意写成字符串 `"2"`。两端空格、中间空格和大小写分别在哪一步被处理，是这次观察的重点。
+
+| 走到哪里 | 当前数据 | 这一步真正做了什么 |
+| --- | --- | --- |
+| HTTP 请求体 | `{"left_text":"  AB CD  ","right_text":"abce","ngram_size":"2"}` | 传输的是 JSON，不是 Python 对象 |
+| JSON 解析后 | Python 字典，`ngram_size` 还是字符串 | 解析 JSON 不会猜这个字段应该是整数 |
+| `CompareRequest` 校验后 | 左边 `"AB CD"`，右边 `"abce"`，`ngram_size=2` | 去掉两端空白，把可转换的 `"2"` 转成整数，再检查范围 |
+| `normalize_text()` 后 | 左边 `"abcd"`，右边 `"abce"` | 算法再统一大小写、去掉中间空白；这不是 Pydantic 做的 |
+| 切片并去重后 | 左边 `ab/bc/cd`，右边 `ab/bc/ce` | 每次向右挪一个字符，取长度为 2 的片段，放进集合 |
+| `SimilarityResult` | 交集 2，并集 4，分数 0.5，两边长度均为 4 | 得到带名字的计算结果，还没有写数据库 |
+| `ComparisonRecord` | 把上述分数、数量、长度填进映射对象 | 先在内存中构造一条待保存记录，没有原文字段 |
+| `flush()`、`commit()` 后 | 得到数据库生成的 `record.id`，事务提交成功 | 此时才有本次保存成功的记录 |
+| `CompareResponse` 与 JSON 响应 | 记录编号、分数、计数、固定算法名和说明 | 模型检查响应字段，再交给框架生成 HTTP 响应 |
+
+可以把下面整段保存为临时的 `.py` 文件，在仓库根目录用 `uv run python 文件名.py` 运行。它只观察模型与计算，不创建数据库，也不假装已经保存成功。
+
+```python
+# runnable: request_trace
+import json
+from dataclasses import asdict
+
+from ip_copyright_inspector.schemas import CompareRequest
+from ip_copyright_inspector.similarity import (
+    character_ngrams,
+    compare_texts,
+    normalize_text,
+)
+
+raw = '{"left_text":"  AB CD  ","right_text":"abce","ngram_size":"2"}'
+payload = json.loads(raw)
+print("json:", repr(payload["left_text"]), type(payload["ngram_size"]).__name__)
+
+request = CompareRequest.model_validate(payload)
+print("model:", repr(request.left_text), request.ngram_size, type(request.ngram_size).__name__)
+print("normalized:", normalize_text(request.left_text), normalize_text(request.right_text))
+print("left grams:", sorted(character_ngrams(request.left_text, request.ngram_size)))
+print("right grams:", sorted(character_ngrams(request.right_text, request.ngram_size)))
+
+result = compare_texts(request.left_text, request.right_text, ngram_size=request.ngram_size)
+print("result:", asdict(result))
+assert result.score == 0.5
+assert (result.intersection_count, result.union_count) == (2, 4)
+```
+
+前五行应依次看到 `json: '  AB CD  ' str`、`model: 'AB CD' 2 int`、`normalized: abcd abce`、`['ab', 'bc', 'cd']` 和 `['ab', 'bc', 'ce']`。最后的结果字典还会列出左右片段数都是 3、归一化长度都是 4。
+
+这里同一份输入出现了三种“长度”：原始左文本长度是 9，模型去掉两端空白后是 5，算法去掉中间空白后是 4。数据库中的 `left_normalized_length` 保存最后这个 4，不是 HTTP 原文字数。
+
+1.4 失败时，流程在哪一层停下来
+
+如果 `ngram_size` 改成 9，模型校验失败，FastAPI 不会进入 `create_comparison` 的函数体，也就不会算分或新增记录。不过依赖准备可能已发生，因此不能把它理解成“框架任何准备工作都没做”。
+
+如果模型通过、数据库写入失败，就走路由中的 `except SQLAlchemyError`：先回滚，再返回 503。两种失败不是一回事：422 是请求不符合约定，503 是这次结果没能按代码预期保存。默认模型校验不会替你检查数据库是否能写入。
+
+成功路径则先提交，再构造响应。这避免不了所有分布式失败，例如提交后客户端断网仍可能收不到响应，所以“客户端没收到成功”也不能直接推出“数据库一定没有写入”。本例没有实现请求幂等机制，这一点要和正常事务流程分开记。
+
 2）类型提示：写了 `int`，不代表运行时一定是 `int`
 
 2.1 注解告诉工具你的打算，不自动拦住调用
@@ -190,6 +248,56 @@ uv run python -c "from ip_copyright_inspector.schemas import CompareRequest; pri
 
 记住：范围用 `Field`，单字段规则用 `field_validator`，字段之间的关系用模型验证器。
 
+3.4 把“字段类型、默认值、限制条件”拆开读
+
+拿仓库这一项来说：`ngram_size: int = Field(default=3, ge=1, le=8)`，每部分回答的问题不同：
+
+- `int`：模型内部希望得到什么类型。它不是说外部只能提交整数文本形式；是否允许转换还取决于校验配置。
+- `default=3`：请求中完全没有这个字段时用什么值。显式传 `None` 不等于“没传”，这里仍会失败。
+- `ge=1`：结果不能小于 1，`ge` 可以按“大于或等于”记。
+- `le=8`：结果不能大于 8，`le` 可以按“小于或等于”记。
+- `description=...`：给文档和调用方的说明，不会因为写了一句话就自动多出业务检查。
+
+`left_text` 和 `right_text` 没有默认值，因此必须提供。`str | None` 表示允许空值，也不等于自动允许省略；“能不能为 None”和“没传时有没有默认值”是两个问题。
+
+下面直接调用仓库模型，不改源代码。每次只变一个条件，输出错误位置和错误类型，不打印用户原文：
+
+```python
+# runnable: schema_cases
+from pydantic import ValidationError
+from ip_copyright_inspector.schemas import CompareRequest
+
+base = {"left_text": "  AB CD  ", "right_text": "abce"}
+cases = [
+    ("omitted", base),
+    ("string integer", base | {"ngram_size": "2"}),
+    ("explicit None", base | {"ngram_size": None}),
+    ("too large", base | {"ngram_size": 9}),
+    ("blank", base | {"left_text": "   "}),
+    ("missing", {"right_text": "abce"}),
+    ("extra", base | {"ngram_szie": 2}),
+]
+
+for label, data in cases:
+    try:
+        model = CompareRequest.model_validate(data)
+        print(label, "OK", repr(model.left_text), model.ngram_size)
+    except ValidationError as error:
+        print(label, [(item["loc"], item["type"]) for item in error.errors()])
+```
+
+核对顺序：省略得到默认值 3；字符串整数得到整数 2；显式 `None` 是 `int_type`；9 是 `less_than_equal`；空白是 `string_too_short`；漏左字段是 `missing`；拼错字段名是 `extra_forbidden`。最后一个不是自动认出你的拼写，而是因为模型禁止额外字段。
+
+3.5 为什么空白文本没走到自定义错误提示
+
+仓库的 `field_validator` 没指定 `mode`，用的是默认的 `after`：先通过字段自带的解析与校验，再调用这个函数。对左文本 `"   "` 来说，去两端空白后已经变成 `""`，长度 0 不满足 `min_length=1`，因此先得到 `string_too_short`，不会再执行后面的自定义检查。不是验证器失效，而是前面已经拦住了。关于 before/after 的次序可对照 [Pydantic 验证器说明](https://pydantic.dev/docs/validation/latest/concepts/validators/)。
+
+同理，正常的 `" AB CD "` 先变成 `"AB CD"`，验证器拿到它，检查后 `return value`。这里 `@classmethod` 中的 `cls` 是模型类，不是某个请求实例；真正要检查的是 `value`。返回值会成为这个字段最终使用的值，所以成功时不能忘了返回。
+
+默认值还有一个容易漏掉的条件：Pydantic 默认不重新校验字段默认值，要检查默认值需配置 `validate_default=True`。这意味着不能随手把 `default=3` 改成 99，再指望 `le=8` 一定帮你拦住省略字段的请求。仓库当前的默认值 3 本身是合法的。见 [默认值校验说明](https://pydantic.dev/docs/validation/latest/concepts/fields/)。
+
+要试严格输入，不必修改共享模型，可以临时执行 `CompareRequest.model_validate(base | {"ngram_size": "2"}, strict=True)`。这时字符串 `"2"` 会报整数类型错误，而整数 `2` 能通过。严格模式是在改变“允许怎样的输入”，不是让输出数字更精确。
+
 4）FastAPI：请求进来以后，由哪个函数处理
 
 4.1 路由函数就是入口
@@ -265,6 +373,97 @@ uv run uvicorn ip_copyright_inspector.main:app --reload
 - 开发用的 `/docs`、`--reload` 和宽松配置，是否未经处理就带到了公网？
 
 记住：路由安排流程，模型检查字段，业务函数计算，会话负责数据库操作。
+
+4.5 对照真实路由，读懂签名中的每个位置
+
+前面的 `build_response` 只是结构草图。仓库真正执行的是 `main.py` 中这份签名：`async def create_comparison(request: CompareRequest, session: SessionDependency) -> CompareResponse`，对应地址是 `POST /api/v1/comparisons`，不是草图里的短地址。
+
+先不要把所有冒号都理解成“普通注释”。Python 本身不强制注解，但 FastAPI 主动读取它们，所以它们在框架这里有了具体用途：
+
+- `request: CompareRequest`：把请求体按模型校验。成功后传进来的是模型对象，路由才能用 `request.left_text`，不是手动从原始 JSON 字符串里找字段。
+- `session: SessionDependency`：这个别名里装着 `AsyncSession` 类型和 `Depends(get_session)`。FastAPI 调用依赖拿到会话，不要求客户端在 JSON 里传一个数据库连接。
+- `-> CompareResponse`：说明正常返回对象的类型。路由装饰器还明确写了 `response_model=CompareResponse`，FastAPI 据此检查、整理响应；如果两个声明不同，显式的 `response_model` 优先。
+- `status_code=201`：正常返回走创建成功状态。它不意味着路由里面抛出的所有异常也会被改成 201。
+
+响应模型不是“多加一份文档”。如果返回内容缺少必要字段或不符合模型，属于服务端代码没有兑现输出约定，不应当归咎于用户输入而返回 422；框架会按响应校验错误处理。具体作用见 [FastAPI 响应模型说明](https://fastapi.tiangolo.com/tutorial/response-model/)。
+
+路由函数体按真实代码分成四段：调用 `compare_texts()` 得到 `result`；把 `result` 的八个字段复制给 `ComparisonRecord`；`add/flush/commit` 保存；最后创建 `CompareResponse`。这不是把 ORM 对象直接扔给网络，所以数据库内部字段不会因为碰巧存在就自动全被返回。
+
+其中 `method` 和 `notice` 不需要路由重复填写，因为响应模型提供了固定默认值；`notice` 还使用 `Literal` 限定为指定文本。`record_id` 没有这种默认值，必须来自保存后的记录编号。
+
+4.6 不开端口，完整跑一遍 201、422 和数据库记录
+
+下面是完整可运行的小实验，使用仓库的真实 `app`，不是另写一个假接口。它在临时目录建独立 SQLite，退出时清理，不访问开发数据库，也不需要先启动 Uvicorn。请把整段放在一个新的脚本中，从仓库根目录用 `uv run python 文件名.py` 运行；不要和另一个正在同进程使用 `app` 的任务同时执行。
+
+```python
+# runnable: api_roundtrip
+from contextlib import closing
+from pathlib import Path
+import sqlite3
+from tempfile import TemporaryDirectory
+from unittest.mock import patch
+
+from fastapi.testclient import TestClient
+from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
+
+from ip_copyright_inspector import database
+from ip_copyright_inspector.main import app
+from ip_copyright_inspector.schemas import LEGAL_NOTICE
+
+with TemporaryDirectory(prefix="comparison-demo-") as directory:
+    path = Path(directory) / "isolated.db"
+    demo_engine = create_async_engine(f"sqlite+aiosqlite:///{path.as_posix()}")
+    factory = async_sessionmaker(demo_engine, expire_on_commit=False)
+    with patch.object(database, "engine", demo_engine), patch.object(
+        database, "async_session_factory", factory
+    ):
+        with TestClient(app) as client:
+            payload = {"left_text": "  AB CD  ", "right_text": "abce", "ngram_size": "2"}
+            response = client.post("/api/v1/comparisons", json=payload)
+            body = response.json()
+            print("success:", response.status_code, body["record_id"], body["score"])
+            assert response.status_code == 201
+            assert body["score"] == 0.5
+            assert body["notice"] == LEGAL_NOTICE
+
+            bad = client.post("/api/v1/comparisons", json=payload | {"ngram_size": 9})
+            print("failure:", bad.status_code, bad.json()["detail"][0]["loc"])
+            assert bad.status_code == 422
+            assert all("input" not in item for item in bad.json()["detail"])
+
+            with closing(sqlite3.connect(path)) as connection:
+                rows = connection.execute(
+                    "SELECT id, score, intersection_count, union_count FROM comparison_records"
+                ).fetchall()
+            print("saved:", rows)
+            assert rows == [(body["record_id"], 0.5, 2, 4)]
+```
+
+预期三行重点输出是 `success: 201 1 0.5`、`failure: 422 ['body', 'ngram_size']`、`saved: [(1, 0.5, 2, 4)]`。编号为 1 是因为每次实验都建全新临时库，不代表真实服务每次请求的编号都是 1。
+
+这次成功请求的完整响应内容如下。对照第 1.3 点的中间数据看：长度来自归一化文本，计数来自去重后的集合，编号来自数据库，`method` 和 `notice` 来自响应模型的固定值。
+
+```json
+{
+  "record_id": 1,
+  "method": "character_ngram_jaccard",
+  "score": 0.5,
+  "ngram_size": 2,
+  "left_ngram_count": 3,
+  "right_ngram_count": 3,
+  "intersection_count": 2,
+  "union_count": 4,
+  "left_normalized_length": 4,
+  "right_normalized_length": 4,
+  "notice": "该分数仅表示字符片段集合的技术相似度，不构成侵权、权属或其他法律结论。"
+}
+```
+
+可以看到原来的 `left_text`、`right_text` 没有被原样发回；数据库映射里的 `created_at` 也没出现在响应中，因为响应模型没有这个字段。这就是“数据到了下一层，不一定还是上一层那整个对象”的具体例子。
+
+注意这里的顺序证据：先发成功请求，再发失败请求，最后数据库仍只有一条。422 不会悄悄变成一个分数为 0 的“成功结果”。`patch.object` 只在这个实验范围替换数据库对象，退出恢复；`with TestClient` 会运行应用的启动建表和退出清理。
+
+查询时特意用了 `closing(sqlite3.connect(...))`。`sqlite3.Connection` 自己的 `with` 主要管理事务，不负责退出时关闭连接；`closing` 才在这里明确关闭。否则 Windows 上临时目录清理时，可能因为数据库文件仍被占用而失败。
 
 5）SQLAlchemy 异步 ORM：对象怎么存进去，事务怎么算完成
 
@@ -365,6 +564,98 @@ uv run uvicorn ip_copyright_inspector.main:app --reload
 - 用 `create_all()` 代替生产迁移。
 
 记住：会话不并发共享；`flush` 发 SQL，`commit` 才提交，失败要回滚。
+
+5.6 真正跟一次对象状态：有主键，不等于已经提交
+
+仓库的 `ComparisonRecord` 不只是一个分数字段。`score`、`ngram_size`、左右片段数、交并集数、左右长度都要填；`id` 由数据库生成，`method` 有默认值，`created_at` 使用数据库时间默认值。漏掉必填列，可能是在执行 INSERT 时才报错，不是构造 Python 对象时就一定报错。
+
+按下面顺序区分“内存对象”和“数据库事务”：
+
+| 操作 | Python 对象/会话发生什么 | 是否已提交这条记录 |
+| --- | --- | --- |
+| 创建引擎与会话工厂 | 准备连接配置和创建会话的办法，不等于已执行查询 | 否 |
+| 创建 `ComparisonRecord(...)` | 得到普通的待映射对象，主键通常还是 None | 否 |
+| `session.add(record)` | 会话开始跟踪对象，记录为待新增 | 否；这行本身不执行 INSERT |
+| `await session.flush()` | 把待写入变化变成 SQL，通常填回自增主键 | 否；仍在未提交事务内 |
+| `await session.commit()` | 必要时先 flush，再提交事务 | 提交正常完成后，是 |
+| `await session.rollback()` | 放弃当前尚未提交的事务改动 | 不能撤回之前已提交的事务 |
+| `await session.refresh(record)` | 重新 SELECT 数据库当前值，更新对象 | 它是查询，不是提交 |
+
+这和 Java 的 `save` 也有一个共同提醒：不能只根据“对象有 id 了”判断事务已经完成。真正的持久性还涉及数据库的事务和存储配置，不要把 Python 对象状态当成磁盘状态。
+
+下面用真实映射和内存 SQLite 做两次实验：第一次有主键后回滚，第二次提交。内存库仅存在于本次进程，不会留下数据库文件。
+
+```python
+# runnable: transaction_states
+import asyncio
+from dataclasses import asdict
+
+from sqlalchemy import func, inspect, select
+from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
+
+from ip_copyright_inspector.database import Base, ComparisonRecord
+from ip_copyright_inspector.similarity import compare_texts
+
+
+async def transaction_demo():
+    engine = create_async_engine("sqlite+aiosqlite:///:memory:")
+    factory = async_sessionmaker(engine, expire_on_commit=False)
+    try:
+        async with engine.begin() as connection:
+            await connection.run_sync(Base.metadata.create_all)
+
+        fields = asdict(compare_texts("abcd", "abce", ngram_size=2))
+        async with factory() as session:
+            record = ComparisonRecord(**fields)
+            print("new:", record.id, inspect(record).transient)
+            session.add(record)
+            print("added:", record.id, inspect(record).pending)
+            await session.flush()
+            print("flushed:", record.id is not None, inspect(record).persistent)
+            await session.rollback()
+
+        async with factory() as session:
+            count = await session.scalar(select(func.count()).select_from(ComparisonRecord))
+            print("after rollback:", count)
+            assert count == 0
+
+            record = ComparisonRecord(**fields)
+            session.add(record)
+            await session.flush()
+            saved_id = record.id
+            await session.commit()
+            print("after commit:", record.score)
+
+        async with factory() as session:
+            saved = await session.get(ComparisonRecord, saved_id)
+            assert saved is not None
+            print("new session:", saved.score, saved.intersection_count, saved.union_count)
+            assert saved.score == 0.5
+    finally:
+        await engine.dispose()
+
+
+if __name__ == "__main__":
+    asyncio.run(transaction_demo())
+```
+
+核对输出：`new: None True`、`added: None True`、`flushed: True True`、`after rollback: 0`、`after commit: 0.5`、`new session: 0.5 2 4`。第一条拿到主键的记录回滚后不存在；第二条提交的记录换一个会话仍能查到。
+
+这里 `inspect(record).persistent` 是 SQLAlchemy 的对象状态名，意思是“对象已经和会话中的数据库身份关联”，不是“事务已经永久提交”。不要看到英文 persistent 就忽略后面的 `commit()`。
+
+5.7 为什么我没写 flush，数据库也执行了 INSERT
+
+SQLAlchemy 默认会在某些 ORM 查询前自动 flush。比如先 `session.add(record)`，再执行一条 ORM `select()`，为了让查询看到本次待写入变化，它可能先执行 INSERT。`commit()` 也会先 flush 待处理的变化。因此“只有手写 flush 才发写入 SQL”是错的。见 [SQLAlchemy flush 与会话说明](https://docs.sqlalchemy.org/en/20/orm/session_basics.html#flushing)。
+
+`with session.no_autoflush:` 可以暂时关闭查询触发的自动 flush，方便先把对象填完整再查询；它不会禁止显式 `flush()`，也不会取消提交时的 flush。不要把它当成“禁止数据库写入”的安全开关。
+
+仓库工厂写了 `expire_on_commit=False`：提交后保留对象中已加载的属性，便于继续读取。否则某些属性可能被标记为需要重新从数据库加载，异步代码随后读属性就更需要注意隐式 I/O。这个选项不意味着数据永远最新，需要新值时仍应明确查询或刷新。
+
+最后看 `get_session()` 中的 `async with` 和 `yield`：前者负责会话退出时清理，后者把会话临时交给路由。离开 `async with session` 不会替业务自动提交；本例的成功提交是路由明确写的 `await session.commit()`。
+
+沿着异常再走一次：若 `flush()` 抛 `SQLAlchemyError`，下一行读取 `record.id` 和后面的 `commit()` 都不会执行，直接进入 `except`；若 `commit()` 抛错，则已经执行过 flush，但路由仍要回滚当前事务并抛出 `HTTPException(503, ...)`。抛异常会退出当前正常流程，因此不会继续执行末尾构造成功 `CompareResponse` 的代码。
+
+这段 `try` 只包住数据库保存步骤。它没有声称所有程序错误都能被转换成 503，例如计算函数里的编程错误不在这个捕获范围。排错时先看异常发生在哪一行、被哪个 `except` 捕获，比只记住一个状态码更有用。
 
 6）相似度算法：分数到底是怎么算出来的
 

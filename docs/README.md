@@ -7,6 +7,7 @@
 - [00 Java 转 Python](00-java-to-python-map.md)：对照熟悉的 Java 写法，找到阅读入口。
 - [01 基础与容器](01-python-basics.md)：类型、字符串、四类容器、切片、zip 和推导式。
 - [02 函数与常用写法](02-functions-pythonic.md)：参数、作用域、闭包、装饰器、上下文管理器和生成器。
+- map、filter、reduce 想看执行过程：直接在 02 中找 7.3–7.13，再运行 `python examples/higher_order_lab.py` 逐轮核对。
 - [03 面向对象](03-object-oriented.md)：self、魔术方法、property、鸭子类型和 MRO。
 - [04 并发](04-concurrency.md)：GIL、线程、进程和 asyncio，按任务选择用法。
 - [05 后端工程](05-backend-engineering.md)：类型提示、Pydantic、FastAPI、SQLAlchemy、uv 和 pytest。

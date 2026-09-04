@@ -6,6 +6,7 @@
 
 - basics_lab.py：容器、字符串、切片、zip、推导式和综合小练习。
 - functions_lab.py：参数、作用域、递归、装饰器、上下文管理器和生成器。
+- higher_order_lab.py：逐轮打印 map、filter、reduce 的输入与结果，验证初始值、空输入、错误写法和自测答案。
 - oop_lab.py：property、魔术方法、鸭子类型和多重继承。
 - concurrency_lab.py：线程池、进程池、锁、asyncio、限流和超时。
 - pitfalls_lab.py：可变默认参数、闭包晚期绑定、浅拷贝和对象身份。

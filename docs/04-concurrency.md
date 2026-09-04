@@ -87,6 +87,10 @@ class Account:
 
 锁只解决同一进程内、共享同一对象的线程竞争。多进程或多机器部署中的余额一致性仍应依靠数据库事务、行锁、乐观锁或专门的分布式协调方案。
 
+比如余额 100，两个线程都要取 80。没有业务锁时，可能出现：甲检查 100，乙也检查 100，甲扣完剩 20，乙仍根据刚才的检查继续扣，余额就可能出问题。加锁后，甲先完成“检查、扣款、释放锁”，乙才能进去；乙此时读到的是 20，就返回 False。
+
+`with self._lock` 会在退出块时释放锁，包括从块里 `return False` 的情况，不用在每个分支手写 release。重点是两个线程操作同一个 Account，也使用同一把锁；各自临时创建一把锁，当然拦不住对方。这个片段只演示竞争控制，取款金额是否为正等输入规则还需另行校验。
+
 3）线程池：现有代码经常等 I/O，就先考虑它
 
 3.1 map 适合按输入顺序拿结果
@@ -110,6 +114,10 @@ print(results)
 ```
 
 `executor.map` 并发执行，但结果仍按输入顺序产出。某个任务抛出的异常会在调用方取到对应结果时重新抛出。
+
+这一行的三个部分分别在做什么：`read_remote` 是要交给线程执行的函数，写函数名，不要提前加括号调用；`range(6)` 提供六个参数 0 到 5，每项对应一次 `read_remote(item_id)`；`max_workers=4` 表示最多四个工作线程同时处理，剩余工作等待线程空闲。
+
+`executor.map(...)` 返回一个结果迭代器，外面的 `list(...)` 会逐项取结果并等待需要的结果到达。假如编号 0 最慢，编号 1 已经完成，也不会让 1 越过 0 出现在列表最前面。因此“任务完成顺序”和“结果交付顺序”是两件事。
 
 3.2 submit 加 as_completed，谁先完成就先处理谁
 
@@ -135,6 +143,8 @@ with ThreadPoolExecutor(max_workers=4) as executor:
 ```
 
 Future 可以理解成“稍后领取结果的凭据”。任务成功，`result()` 取回值；任务失败，`result()` 在调用方重新抛出异常。上面同时保存 `future_to_id`，是为了出错时还能知道失败的是哪项任务。
+
+具体看 `executor.submit(read_remote, 2)`：提交时先返回一个 Future，不会在这一行等到 `read_remote(2)` 做完。`as_completed` 交出来的 Future 则已经结束，所以随后 `future.result()` 是取回结果或重新抛出它保存的异常。若不用 as_completed，直接对尚未结束的 Future 调用 result，调用它的线程就会等在那里。
 
 3.3 线程数、取消和锁，都有各自的边界
 
@@ -179,6 +189,8 @@ def main() -> None:
 if __name__ == "__main__":
     main()
 ```
+
+进程版的参数和线程版类似，但有一道额外步骤：主进程把 `100_000` 这样的参数传给工作进程，工作进程调用 `sum_of_squares(100_000)`，计算完成再把整数结果送回。函数内部的普通局部变量属于工作进程，主进程拿到的是结果，不是共享了那段函数的运行现场。
 
 4.2 Windows 为什么必须写 main guard
 
@@ -243,6 +255,39 @@ if __name__ == "__main__":
 
 `asyncio.run` 创建事件循环、运行顶层协程并完成清理，普通脚本通常只调用一次。已经运行事件循环的 Notebook 或异步框架内部应直接 `await main()`，不能嵌套调用 `asyncio.run()`。
 
+先暂时放下 gather，单独看“创建协程”和“执行协程”的区别。下面这段可以单独存为 `.py` 文件运行：
+
+```python
+import asyncio
+
+
+async def job(name: str) -> str:
+    print(name, "start")
+    await asyncio.sleep(0)
+    print(name, "end")
+    return name
+
+
+async def main() -> None:
+    pending = job("A")
+    print("created")
+    first = await pending
+    second = await job("B")
+    print(first, second)
+
+
+asyncio.run(main())
+```
+
+输出顺序是 `created`、`A start`、`A end`、`B start`、`B end`、`A B`。
+
+- `pending = job("A")` 只创建协程对象，所以还没打印 A start；名字叫 pending 还是别的，不改变这一点。
+- `await pending` 才开始推进 A，并且 main 要等到 A 返回，才能给 first 赋值、执行下一行。
+- A 中的 `await asyncio.sleep(0)` 主动给其他已调度任务运行的机会，但此时 B 还没有被创建，更没有被调度，所以不能趁机运行。
+- A 完成以后，main 才执行 `await job("B")`。两行都写了 await，整个顺序依然是 A 完整结束，再轮到 B。
+
+所以“函数里用了 await”和“几个任务已经并发运行”不能画等号。要让 A 等待时 B 也有机会执行，需要提前把两项工作都调度起来，见 5.3。
+
 5.2 await 不是“把下一行扔到后台”
 
 `await` 只能等待 awaitable，例如协程、Task 或 Future。它不是“把下一行放进后台”。当前任务遇到尚未完成的异步 I/O 时，把控制权交回事件循环；事件循环再推进其他就绪任务。
@@ -281,6 +326,84 @@ result = await asyncio.to_thread(blocking_function, argument)
 
 `asyncio.create_task(coro())` 会把协程调度为 Task。应保存任务引用并在明确位置等待它；随手创建后台任务又不管理生命周期，异常和取消都很难处理。
 
+把这几个名字分开就清楚了：协程对象是一份尚待推进的工作；Task 是事件循环已经接手管理的那份工作，里面会记录完成、失败或取消状态；`await task` 是当前协程等它的结果。等待者暂停，不代表整个线程原地阻塞，事件循环仍能推进其他就绪任务。
+
+下面不用比较毫秒，也能确定 B 先完成、A 后完成。`Event` 只是一道通知：`wait()` 等通知，`set()` 发通知；没有设置时，等待它的协程会暂停。
+
+```python
+import asyncio
+
+
+async def main() -> None:
+    a_started = asyncio.Event()
+    b_finished = asyncio.Event()
+    trace: list[str] = []
+
+    async def job_a() -> str:
+        trace.append("A start")
+        a_started.set()
+        await b_finished.wait()
+        trace.append("A end")
+        return "A"
+
+    async def job_b() -> str:
+        await a_started.wait()
+        trace.append("B start")
+        trace.append("B end")
+        b_finished.set()
+        return "B"
+
+    first = asyncio.create_task(job_a())
+    second = asyncio.create_task(job_b())
+    results = await asyncio.gather(first, second)
+    print(trace)
+    print(results)
+
+
+asyncio.run(main())
+```
+
+两行输出分别是 `['A start', 'B start', 'B end', 'A end']` 和 `['A', 'B']`。
+
+按过程看：main 调度两个任务，再等待 gather；A 发出“我开始了”的通知，然后等 B；B 收到通知后完成自己的工作，发出“我结束了”；A 才继续完成。B 先完成是 Event 之间的依赖保证的，不是靠机器恰好跑得快。
+
+最后 gather 仍按 `first, second` 的传入顺序放结果，所以得到 A、B，不是 B、A。也可以直接把 `job_a()`、`job_b()` 传给 gather，它会把传入的协程调度为任务；单独调用这两个协程函数、把对象存进列表，却不会得到同样的执行效果。
+
+再看一个故意失败的小实验。它保留了慢任务的引用，让你看到 gather 抛异常之后，慢任务到底是什么状态：
+
+```python
+import asyncio
+
+
+async def main() -> None:
+    started = asyncio.Event()
+    release = asyncio.Event()
+
+    async def slow() -> str:
+        started.set()
+        await release.wait()
+        return "slow finished"
+
+    async def broken() -> None:
+        await started.wait()
+        raise ValueError("broken")
+
+    slow_task = asyncio.create_task(slow())
+    try:
+        await asyncio.gather(slow_task, broken())
+    except ValueError:
+        print("caught error; slow done:", slow_task.done())
+    release.set()
+    print(await slow_task)
+
+
+asyncio.run(main())
+```
+
+先输出 `caught error; slow done: False`，再输出 `slow finished`。broken 抛错后，main 离开 gather 进入 except，但 slow 仍在等 release，并没有自动取消。main 发通知后，slow 才继续返回；最后的 await 也明确收走它的结果。
+
+如果 except 后直接结束 main，你可能反而看到慢任务被取消：那通常是 `asyncio.run` 在退出事件循环时清理剩余任务，不是 gather 的单任务失败自动取消了兄弟任务。区分“谁触发取消”，才能看懂实验输出。
+
 5.4 TaskGroup 把一组任务的开始和收尾管在一起
 
 Python 3.11 的 `asyncio.TaskGroup` 适合“几个任务共同完成一次操作”的情况。任务都放进同一个 `async with` 代码块，退出时统一等它们收尾；通常一个任务以非取消异常失败，就会取消其余任务，最后用异常组报告失败。这样不容易出现主流程已经结束、后台任务却无人管理的情况。
@@ -302,6 +425,44 @@ async def main() -> None:
 ```
 
 代码块正常退出，才可以像示例这样读取两个结果；如果失败，异常会走异常处理路径，不能当作两个任务都成功了。TaskGroup 会协调取消和等待，但也不会自动撤销任务已经写入的数据库数据。
+
+上面先定义了 main，单独作为脚本运行时，要在末尾调用 `asyncio.run(main())`。`group.create_task(...)` 负责启动，退出 `async with` 负责统一等待；出了代码块再读 `first.result()`，正常路径下任务已经完成，所以这里不再需要 await。
+
+下面用同样的“先等待，再故意失败”观察 TaskGroup 的不同。finally 用来证明慢任务确实经过了收尾：
+
+```python
+import asyncio
+
+
+async def main() -> None:
+    started = asyncio.Event()
+    never_released = asyncio.Event()
+
+    async def slow() -> None:
+        try:
+            started.set()
+            await never_released.wait()
+        finally:
+            print("slow cleaned")
+
+    async def broken() -> None:
+        await started.wait()
+        raise ValueError("broken")
+
+    try:
+        async with asyncio.TaskGroup() as group:
+            group.create_task(slow())
+            group.create_task(broken())
+    except* ValueError:
+        print("group failed")
+
+
+asyncio.run(main())
+```
+
+输出依次是 `slow cleaned`、`group failed`。broken 失败后，任务组请求取消 slow；slow 在等待位置收到取消，执行 finally；任务组等收尾完成，再把异常组交给外层。`except* ValueError` 处理异常组中对应的 ValueError，不是把整个组当成一个普通 ValueError。
+
+这里慢任务没有吞掉取消，所以收尾能完成。如果任务卡在阻塞调用里，或捕获取消后继续不退出，TaskGroup 也不能凭空把它瞬间停掉。这就是为什么需要配合后面的超时和清理规则。
 
 5.5 Semaphore 限制同时执行的数量，队列限制积压
 
@@ -327,6 +488,10 @@ async def main() -> None:
 
 这里有 100 个任务，但同一时刻最多 20 个进入 `async with gate`。注意，Semaphore 只限制同时进入的数量，不会减少已经创建的任务数。数据量很大时，还要用有界队列或分批提交，让生产方在积压过多时等一等；这就是“背压”。
 
+配套 lab 把数量缩到 4 个任务、2 张通行证，更容易跟踪：两项任务拿到通行证，probe.active 从 0 增到 2；它们在 sleep 等待时仍占着通行证；其他任务等待，不能让 active 变成 3。已有任务经过 finally 减少 active，再退出 `async with gate` 归还通行证，后面的任务才有机会进去。具体哪项先拿到证不要当成业务保证，始终不超过 2 才是要验证的规则。
+
+`probe.maximum_active` 记录的是“同时处在这段未完成 I/O 中的任务数”，不是“同一时刻有几个协程在 CPU 上运行”。单线程事件循环里，两项等待可以重叠，Python 代码仍是轮流执行。
+
 上限要一起看 HTTP 客户端、数据库连接池和下游配额。所谓“单线程支撑十万连接”依赖具体负载、操作系统和内存条件，不是加上 `asyncio` 就能得到的保证。
 
 5.6 超时之后，还要把连接和锁还回去
@@ -346,6 +511,10 @@ async def main() -> None:
 ```
 
 取消不是把正在执行的函数从中间强行抹掉。它通常在 `await` 点通过 `asyncio.CancelledError` 通知协程“该停下了”。用 `try/finally` 或异步上下文管理器释放连接、归还锁；如果专门捕获了 `CancelledError` 做清理，清理后通常还要 `raise`，让上层知道取消没有被悄悄吃掉。
+
+上面 timeout 片段的顺序是：进入范围并开始计时；sleep 还没完成时达到 0.2 秒，当前等待被取消；退出 timeout 上下文后，外层收到 `TimeoutError`，于是打印 timed out。不要把它理解成 sleep 自动改成了 0.2 秒后正常返回。单独运行这段定义时，同样要在末尾加 `asyncio.run(main())`。
+
+`CancelledError` 和一般业务错误也要分开对待。在这里使用的 Python 版本中，它继承自 BaseException，普通 `except Exception` 通常不会抓住它；容易吞掉它的是裸 `except`、`except BaseException`，或者专门捕获后没有重新抛出。清理放 finally，通常更不容易写错。
 
 `asyncio.Lock` 只用于同一事件循环内协程之间的状态协调，不是线程锁，也不能跨进程。临界区内不能执行长时间阻塞操作，否则虽然拿了“异步锁”，事件循环仍被冻住。
 

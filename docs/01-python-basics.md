@@ -240,6 +240,8 @@ print(text.count("na"))   # 2
 
 3.3 拆分、替换与拼接
 
+先把三个方法的参数分清：`split(sep, maxsplit)` 的 `sep` 是按什么拆，`maxsplit` 是最多拆几次，不是最多得到几项；`replace(old, new, count)` 的 `count` 是最多替换几次；`separator.join(parts)` 则把分隔符放在相邻两项之间，不会自动加到开头和结尾。
+
 ```python
 raw = "java,python,go"
 parts = raw.split(",", maxsplit=1)
@@ -258,6 +260,38 @@ print(" ".join(words))  # clean small functions
 numbers = [1, 2, 3]
 print(",".join(map(str, numbers)))  # 1,2,3
 ```
+
+一行连写看着短，但刚接触时容易不知道每一步拿到了什么。先把 `"  Java, Python,Go  "` 拆成四步：
+
+```python
+raw = "  Java, Python,Go  "
+trimmed = raw.strip()
+parts = trimmed.split(",")
+cleaned = []
+for part in parts:
+    cleaned.append(part.strip().lower())
+result = " | ".join(cleaned)
+
+print(repr(trimmed))  # 'Java, Python,Go'
+print(parts)          # ['Java', ' Python', 'Go']
+print(cleaned)        # ['java', 'python', 'go']
+print(result)         # java | python | go
+```
+
+外层的 `strip()` 只处理整段文本的两端，不会删掉逗号后、`Python` 前的空格；因此拆分后还要给每一项做 `part.strip()`。`repr()` 把字符串连同引号显示出来，方便看清空格还在不在。理解上面的普通循环后，再缩成 `[part.strip().lower() for part in parts]` 就不会靠猜了。
+
+拆分方式不同，空项的处理也不同：
+
+```python
+print(" a  b \t c ".split())  # ['a', 'b', 'c']
+print("a,,b,".split(","))     # ['a', '', 'b', '']
+print("".split(","))          # ['']
+print("".split())             # []
+print("-".join([]))           # 输出空字符串，即空行
+print("-".join(["a"]))        # a
+```
+
+不传 `sep` 时，`split()` 按连续空白拆分，会忽略两端空白，不产生这些空项；明确按逗号拆时，两个逗号之间没有内容，也会保留一个 `""`。所以解析用户输入时，要自己决定空项是跳过、保留，还是报错。不能把空字符串 `""` 当分隔符传给 `split()`，那会抛 `ValueError`。
 
 3.4 大小写、两端空白与对齐
 
@@ -354,6 +388,30 @@ print(items)  # [1, 99, 2, 3, 4]
 
 `append(x)` 把 `x` 作为一个整体加入；`extend(iterable)` 逐个加入可迭代对象中的元素。执行 `items.extend("ab")` 会加入字符 `"a"` 和 `"b"`。
 
+拿 `extend([3, 4])` 来说，过程可以拆成“取出 3，追加 3；再取出 4，追加 4”。对下面这两个独立列表，效果就等同于这个循环：
+
+```python
+items = [1, 2]
+incoming = [3, 4]
+for value in incoming:
+    items.append(value)
+    print(items)
+
+# [1, 2, 3]
+# [1, 2, 3, 4]
+```
+
+`insert(index, value)` 是插到该下标前面。原来的元素顺次后移，不是把它覆盖掉；覆盖才写 `items[index] = value`。另外，传入空列表也能看清 append 和 extend 的区别：
+
+```python
+first = [1]
+second = [1]
+first.append([])
+second.extend([])
+print(first)   # [1, []]：真的加进了一个空列表
+print(second)  # [1]：空列表没有元素可以逐项加入
+```
+
 4.2 删除：按位置删，还是按值删
 
 ```python
@@ -377,6 +435,21 @@ print(items)           # []
 - `remove(value)` 只删除第一个匹配值；找不到抛 `ValueError`。
 - `del` 是语句，可删除元素、切片或整个变量绑定。
 - `clear()` 原地清空，仍保留同一个列表对象。
+
+顺着上面的例子看：`pop(1)` 先删掉下标 1 的第一个 `20`，剩下 `[10, 20, 30]`；接着 `remove(20)` 按值找到现在仅剩的 `20`，再删成 `[10, 30]`。列表删完一项后，下标会重新接上，所以后续下标要按当前列表来理解。
+
+“清空列表”和“删除变量”也不是一回事：
+
+```python
+items = [1, 2]
+alias = items
+items.clear()
+print(alias)       # []：两个名字看到的列表都被清空
+del items
+print(alias)       # []：列表仍然可以通过 alias 访问
+```
+
+此时再访问 `items` 会得到 `NameError`，但 `alias` 没有消失。空列表上调用 `pop()` 则会得到 `IndexError`，不存在的值交给 `remove()` 会得到 `ValueError`；需要容忍空数据时，要在调用前判断或明确捕获相应异常。
 
 4.3 修改、查找与遍历
 
@@ -421,6 +494,24 @@ shallow[0].append(99)
 print(original)  # [[1, 99], [2]]
 ```
 
+不要只记“浅拷贝不独立”，要看清独立到哪一层。重新从一份干净数据开始：
+
+```python
+original = [[1], [2]]
+shallow = original.copy()
+print(shallow is original)        # False：外层是两个列表
+print(shallow[0] is original[0])  # True：第一个内层列表是同一个
+
+shallow.append([3])
+print(original)                   # [[1], [2]]：外层追加没有影响原表
+
+shallow[0] = [9]
+print(shallow)                    # [[9], [2], [3]]
+print(original)                   # [[1], [2]]：只换了副本第一格的指向
+```
+
+`shallow[0].append(99)` 是先找到共享的小列表，再修改它；`shallow[0] = [9]` 是把副本的第一格改指向新列表。两个语句只差一点写法，动的却不是同一层。判断复制问题时，先问“这一句改的是外层位置，还是里面那个对象”。
+
 如果需要像下面这样，让嵌套列表也各自独立，可以用标准库的 `copy.deepcopy()`：
 
 ```python
@@ -443,6 +534,8 @@ right = [[0] * 3 for _ in range(2)]
 right[0][0] = 9
 print(right)  # [[9, 0, 0], [0, 0, 0]]
 ```
+
+错误版本可以想成先做 `row = [0, 0, 0]`，再做 `[row, row]`：两行实际是同一个对象。正确版本每循环一次，都重新执行 `[0] * 3`，所以得到两个不同的行列表。这里 `_` 只是普通变量名，表示“不需要使用这次循环的序号”。
 
 4.5 排序与反转：sort 改原表，sorted 返回新表
 
@@ -473,6 +566,35 @@ users = [
 users.sort(key=lambda user: (-user["score"], user["age"]))
 print([user["name"] for user in users])  # ['C', 'B', 'A']
 ```
+
+排序键没有把原字典里的分数改成负数，只是临时拿来比较。上面三人的比较键分别是 A 的 `(-90, 30)`、B 的 `(-95, 31)`、C 的 `(-95, 25)`。先比较第一项，`-95 < -90`，所以 B、C 都在 A 前；再比较 B 和 C 的第二项，`25 < 31`，所以最后是 C、B、A。
+
+也别把 `reverse()` 当成降序排序。它只翻转当前排列，比如 `[2, 1, 3]` 翻转后是 `[3, 1, 2]`，并没有排好大小。想按大小降序，使用 `sort(reverse=True)` 或 `sorted(..., reverse=True)`。
+
+4.6 筛掉多项时，不要一边遍历原列表一边删除
+
+假设要删除所有 `1`，循环中调用 `remove()` 很容易漏项：
+
+```python
+items = [1, 1, 2]
+for value in items:
+    if value == 1:
+        items.remove(value)
+print(items)  # [1, 2]：第二个 1 被漏掉了
+```
+
+第一次删掉下标 0，原来下标 1 的那个 `1` 会移到下标 0；但循环下一次已经往下标 1 走了，于是直接读到 `2`。更容易写对的办法是新建结果列表，只把要保留的元素放进去：
+
+```python
+items = [1, 1, 2]
+kept = []
+for value in items:
+    if value != 1:
+        kept.append(value)
+print(kept)  # [2]
+```
+
+对应的推导式是 `[value for value in items if value != 1]`。如果其他变量也引用原列表，而且必须让它们看到筛选后的内容，可以用 `items[:] = kept` 替换原列表的全部内容，而不只是写 `items = kept` 换掉当前名字的指向。
 
 列表记忆口诀：`append` 整包放，`extend` 拆开放；`pop` 按位置删并带回结果，`remove` 按值只删第一个；`sort` 改自己，`sorted` 给新表。
 
@@ -545,6 +667,18 @@ print(user.get("missing", "N/A")) # N/A
 
 `user["missing"]` 会抛 `KeyError`。`get()` 找不到时返回默认值，但要注意：当键存在且值就是 `None` 时，`get()` 同样返回 `None`。需要区分时使用 `key in mapping`。
 
+默认值只在“键不存在”时生效，不会替换已经存在的 `None`、`0` 或空字符串；`get()` 也不会把默认值自动写回字典：
+
+```python
+user = {"nickname": None, "visits": 0}
+print(user.get("nickname", "guest"))  # None：键存在
+print(user.get("visits", 10))         # 0：键存在
+print(user.get("role", "reader"))     # reader：键不存在
+print("role" in user)                 # False：没有自动插入
+```
+
+所以“没填昵称”和“根本没传昵称字段”如果业务上不同，就先检查 `"nickname" in user`，再看对应的值。
+
 6.3 增删改与合并
 
 ```python
@@ -585,6 +719,31 @@ for key, value in scores.items():
 
 `keys()`、`values()`、`items()` 不是把当前内容复制一份，而是给你一个能看到字典内容的“视图”。原字典变了，视图也跟着变。需要保存当时的结果，就用 `list()` 转成列表。
 
+`items()` 每次给出一个 `(键, 值)` 元组，所以 `for key, value in scores.items()` 实际每次都在做一次拆包。把两种写法放在一起看：
+
+```python
+scores = {"alice": 95, "bob": 88}
+for item in scores.items():
+    key, value = item
+    print(key, value)
+
+# alice 95
+# bob 88
+```
+
+动态视图和列表快照的区别，也可以直接打印出来：
+
+```python
+scores = {"alice": 95}
+keys_view = scores.keys()
+keys_snapshot = list(scores)
+scores["bob"] = 88
+print(list(keys_view))  # ['alice', 'bob']
+print(keys_snapshot)   # ['alice']
+```
+
+这里的列表快照只保存当时的元素引用，不等于深拷贝。另一个边界是：遍历字典时不要同时给它增删键，否则可能抛 `RuntimeError` 或漏掉本来想处理的项。需要删除时，可以先收集要删的键，循环结束后再逐个删除。
+
 6.5 分组追加：先准备列表，再放元素
 
 往 `groups["backend"]` 里追加时，第一次可能还没有这个键。`setdefault()` 会在缺键时放入默认值，并返回对应的值；已有键时就直接返回旧值。分组代码多时，也可以用 `collections.defaultdict` 简化：
@@ -596,6 +755,24 @@ groups.setdefault("backend", []).append(2)
 print(groups)  # {'backend': [1, 2]}
 ```
 
+把第一行拆开：先查 `"backend"`，没找到，就放入一个空列表；`setdefault()` 返回的正是字典里那份列表，随后 `.append(1)` 修改它。第二次调用时键已经存在，返回旧列表 `[1]`，所以追加后变成 `[1, 2]`，不会重新清空。
+
+用熟悉的普通分支展开，当前这个例子等价于：
+
+```python
+groups = {}
+for member_id in [1, 2]:
+    if "backend" not in groups:
+        groups["backend"] = []
+    groups["backend"].append(member_id)
+    print(groups)
+
+# {'backend': [1]}
+# {'backend': [1, 2]}
+```
+
+不过 `setdefault()` 不会检查旧值的类型。如果字典里本来是 `{"backend": None}`，它会返回 `None`，后面的 `.append()` 就会报 `AttributeError`。它解决的是“缺键时初始化”，不是“自动修复不合适的旧值”。
+
 字典记忆口诀：方括号是“必须有”，没有就报错；`get` 是“可以没有”，给默认值继续走；遍历键值对就用 `items()`。
 
 小练习：把 `["a", "bb", "ccc"]` 转成 `{"a": 1, "bb": 2, "ccc": 3}`。预期可用一行字典推导式完成。
@@ -605,6 +782,8 @@ print(groups)  # {'backend': [1, 2]}
 7.1 添加和删除
 
 只关心标签有没有重复、不关心“第几个标签”时，就适合用集合。相同元素只保留一份，可以增删，但不能用下标取值，也不要依赖打印出来的顺序。
+
+空集合要写 `set()`，不能写 `{}`，因为 `{}` 已经表示空字典。集合元素和字典键一样，需要可哈希，所以字符串、数字可以直接放，列表不能直接放。
 
 ```python
 tags = {"python", "backend", "python"}
@@ -633,6 +812,20 @@ print(owned - required)           # 差集 {'admin'}
 print(owned ^ required)           # 对称差集 {'admin'}
 ```
 
+上例里 `required` 完全包含在 `owned` 内，差集和对称差集刚好一样，容易误以为它们是同一种运算。换成两边各有独有元素，就能看出区别：
+
+```python
+left = {"read", "write"}
+right = {"read", "audit"}
+print(sorted(left | right))  # ['audit', 'read', 'write']
+print(sorted(left & right))  # ['read']
+print(sorted(left - right))  # ['write']
+print(sorted(right - left))  # ['audit']
+print(sorted(left ^ right))  # ['audit', 'write']
+```
+
+`left - right` 只看左边剩下什么，交换左右就会变；`left ^ right` 把两边各自独有的都留下。这里加 `sorted()` 只是为了输出顺序固定，运算本身返回的仍是集合。
+
 若需要不可变集合，可使用 `frozenset`，它在元素可哈希时自身也可哈希，可作为字典键。
 
 集合记忆口诀：集合没有下标；`add` 加一个，`update` 加一批；`discard` 找不到也安静，`remove` 找不到会报错。
@@ -642,6 +835,14 @@ print(owned ^ required)           # 对称差集 {'admin'}
 8.1 基本写法与负步长
 
 字符串、列表、元组都能切片。读 `[start:stop:step]` 时，按顺序念成“从 start 开始，在 stop 前停，每次走 step 步”。因此 `[1:4]` 取下标 `1、2、3`，不取 `4`，也就是常说的“包头不包尾”。
+
+先不背所有缩写，三个位置分别看：
+
+- `start`：尝试从哪个下标开始；越界时会调整边界，最终也可能没有元素可取。
+- `stop`：在哪个边界之前停，这个位置不取。
+- `step`：每次下标加多少；不写时是 `1`，不能是 `0`。
+
+当步长为正时，省略起点表示从开头，省略终点表示走到末尾之后；当步长为负时，默认从末尾往前走，省略终点表示一直走过最前一项。因此 `[::-1]` 能完整反转，而不是只有“给步长写负数”这么简单。
 
 ```python
 values = [0, 1, 2, 3, 4, 5]
@@ -660,6 +861,25 @@ text = "abcdef"
 print(text[4:1:-1])  # edc
 ```
 
+这里的下标依次是 `4 → 3 → 2`，对应 `e → d → c`；下一个下标是 `1`，碰到停止边界，不再取 `b`。如果改为 `text[1:4:-1]`，起点 1 已经在停止边界 4 的左边，不满足反向切片继续取值的条件，所以直接得到空字符串，不会自动帮你交换起终点。
+
+对于边界都已经合法、无需换算负下标的例子，可以借普通循环理解取值过程：
+
+```python
+text = "abcdef"
+characters = []
+for index in range(4, 1, -1):
+    characters.append(text[index])
+    print(index, characters)
+print("".join(characters))  # edc
+
+# 4 ['e']
+# 3 ['e', 'd']
+# 2 ['e', 'd', 'c']
+```
+
+这个展开只帮助理解当前例子；不要把任意切片机械换成原始参数的 `range()`，因为切片还会换算负下标、截断越界边界。
+
 容易误解的一点是，负步长下仍然不包含 `stop`。可用 `slice(start, stop, step)` 显式创建切片对象：
 
 ```python
@@ -676,6 +896,45 @@ items = [0, 1, 2, 3]
 items[1:3] = [8, 9, 10]
 print(items)  # [0, 8, 9, 10, 3]
 ```
+
+它先选中旧区间 `[1, 2]`，再整段换成 `[8, 9, 10]`，所以长度从 4 变成 5。普通连续切片还可以删除一段，或者在空区间处插入：
+
+```python
+items = [0, 1, 2, 3]
+items[1:3] = []
+print(items)        # [0, 3]
+items[1:1] = [8, 9]
+print(items)        # [0, 8, 9, 3]
+```
+
+但 `items[::2] = ...` 这种步长不为 1 的切片，是给隔开的位置逐个换值。右边必须提供同样数量的元素，不能多也不能少：
+
+```python
+items = [0, 1, 2, 3, 4]
+items[::2] = [10, 20, 30]  # 选中下标 0、2、4，正好三个位置
+print(items)              # [10, 1, 20, 3, 30]
+try:
+    items[::2] = [99]
+except ValueError:
+    print("replacement length mismatch")
+```
+
+8.3 空结果、越界与负下标，怎么提前判断
+
+```python
+values = [0, 1, 2, 3, 4, 5]
+print(values[100:200])  # []：整个范围都在末尾之外
+print(values[-100:3])   # [0, 1, 2]：过小的起点截到开头
+print(values[4:1])      # []：步长默认向右，起点却已超过终点
+print(values[5:-1:-1])  # []：-1 是最后一项的下标，也就是 5
+print(values[5::-1])    # [5, 4, 3, 2, 1, 0]：省略终点才走完整段
+try:
+    print(values[::0])
+except ValueError:
+    print("slice step cannot be zero")
+```
+
+尤其记住最后两个反向切片的区别：省略 `stop` 不是写了一个字面上的 `-1`。明确写 `-1` 时，它代表最后一项；省略时，Python 根据向左的方向选择“走过开头”的默认边界。单独访问 `values[100]` 会报 `IndexError`，切片 `values[100:200]` 却是空列表，这是“取一个位置”和“取一个范围”的区别。
 
 切片记忆口诀：起点算，终点不算，步长决定方向；`[::-1]` 从尾走到头。
 
@@ -716,7 +975,21 @@ print(list(range(2, 8, 2)))    # [2, 4, 6]
 print(list(range(5, 0, -1)))   # [5, 4, 3, 2, 1]
 ```
 
+只有一个参数 `range(5)` 时，这个 5 是终点，默认从 0 开始；两个参数是起点和终点；第三个才是步长。`range(5, 0)` 仍默认向右走，所以结果为空；要倒着走，必须明确写负步长。和切片一样，步长不能是 0。
+
 如果只是同时拿到序号和内容，写 `for index, value in enumerate(items)` 就够了。只有确实需要自己控制下标，或借同一下标访问多个序列时，再考虑 `range(len(items))`。
+
+`enumerate(..., start=1)` 只把显示的计数从 1 开始，不会跳过第一个元素，也不会改变列表的真实下标：
+
+```python
+names = ["Ada", "Lin"]
+for number, name in enumerate(names, start=1):
+    print(number, name)
+print(names[0])  # Ada：实际下标仍然从 0 开始
+
+# 1 Ada
+# 2 Lin
+```
 
 9.4 容器转换与保序去重
 
@@ -736,6 +1009,22 @@ unique_in_order = list(dict.fromkeys(values))
 print(unique_in_order)  # [3, 1, 2]
 ```
 
+这行可以拆成两步。`dict.fromkeys(values)` 先得到 `{3: None, 1: None, 2: None}`：第一次见到 3、1、2 时各放一个键，后面重复的键不会再占一个位置。`list(字典)` 又只取键，所以最后是 `[3, 1, 2]`，保留的是第一次出现的顺序。
+
+它要求元素能当字典键。字符串、整数没有问题；如果元素本身是列表，不能直接套这个写法。`fromkeys()` 的另一个坑是传入可变默认值：
+
+```python
+groups = dict.fromkeys(["a", "b"], [])
+groups["a"].append(1)
+print(groups)  # {'a': [1], 'b': [1]}
+
+independent = {name: [] for name in ["a", "b"]}
+independent["a"].append(1)
+print(independent)  # {'a': [1], 'b': []}
+```
+
+前一种只创建了一份默认列表，两个键共用；后一种每次循环都新建 `[]`。这和二维列表乘法的问题是同一个原因，不需要当作两个孤立的坑来背。
+
 10）zip：把几列数据按位置配成一组
 
 10.1 一个人名配一个分数
@@ -749,6 +1038,34 @@ pairs = list(zip(names, scores))
 print(pairs)  # [('alice', 95), ('bob', 88)]
 print(dict(zip(names, scores)))
 ```
+
+如果先不使用 `zip()`，对这两份普通列表，可以把配对过程写成：
+
+```python
+names = ["alice", "bob"]
+scores = [95, 88]
+pairs = []
+for index in range(min(len(names), len(scores))):
+    pair = (names[index], scores[index])
+    pairs.append(pair)
+    print(pairs)
+
+# [('alice', 95)]
+# [('alice', 95), ('bob', 88)]
+```
+
+第一轮各取下标 0，第二轮各取下标 1，`min(...)` 表示只走到较短的那边。这个展开需要列表能取长度和下标；`zip()` 更通用，也能处理生成器等没有这些能力的输入。
+
+还要留意“结果按需产生”意味着什么：保存下来的同一个 zip 对象，不会每次都自动从头开始。
+
+```python
+paired = zip(["alice", "bob"], [95, 88])
+print(next(paired))  # ('alice', 95)：取走第一组
+print(list(paired))  # [('bob', 88)]：只收集剩下的
+print(list(paired))  # []：已经读完
+```
+
+需要多次使用全部配对时，一开始就用 `pairs = list(zip(...))` 保存结果列表，或者每次重新创建 zip 对象。
 
 10.2 长度不一样时，默认只配到短的那一边
 
@@ -771,6 +1088,31 @@ except ValueError as exc:
 
 这比默默截断更适合账务、批处理等要求严格对齐的数据。若业务要求补齐最长序列，可用 `itertools.zip_longest()`。
 
+`strict=True` 不是创建 zip 对象那一刻就检查所有长度，而是在取数据时检查。前面能够成功配对的数据可能已经交出来了：
+
+```python
+paired = zip([1, 2], ["a"], strict=True)
+print(next(paired))  # (1, 'a')：第一组能配对
+try:
+    next(paired)    # 继续取，才发现第二组少了一项
+except ValueError:
+    print("length mismatch")
+```
+
+因此，批处理中如果“长度不对就一条都不能写入”，不要一边循环 strict zip 一边执行不可撤销的写入。对于规模允许的数据，可以先完整收集、确认配对通过，再执行后续操作。
+
+需要保留长的一侧，则明确指定补充值：
+
+```python
+from itertools import zip_longest
+
+print(list(zip_longest([1, 2, 3], ["a", "b"], fillvalue=None)))
+# [(1, 'a'), (2, 'b'), (3, None)]
+print(list(zip([], [1, 2])))  # []：默认 zip 中任意一边为空就结束
+```
+
+`fillvalue` 不写时也是 `None`。它只是补上缺项，不会替你判断缺项是否合理；业务数据本来可能就是 `None` 时，还要区分“原值就是空”和“因为长度不足补的空”。
+
 10.3 用 zip(*pairs) 把一组组数据重新拆成列
 
 ```python
@@ -779,6 +1121,20 @@ names, scores = zip(*pairs)
 print(names)   # ('alice', 'bob')
 print(scores)  # (95, 88)
 ```
+
+这不是 zip 的另一个特殊模式，而是两步普通操作：`*pairs` 先把两行展开，相当于调用 `zip(("alice", 95), ("bob", 88))`；zip 再按位置配对，先得到两行的第 0 项 `("alice", "bob")`，再得到第 1 项 `(95, 88)`。最后左边的 `names, scores` 把这两组结果接住。
+
+如果 `pairs` 是空列表，zip 就没有任何一组能交出来，无法拆给两个变量：
+
+```python
+pairs = []
+try:
+    names, scores = zip(*pairs)
+except ValueError:
+    print("no rows to unpack")
+```
+
+确实允许没有数据时，可以先写 `if pairs:`，空的分支给 `names, scores` 都设为空元组，别假设拆列会自动产生两个空列。
 
 `zip` 记忆口诀：像拉链，按位扣；默认看最短，严格对齐加 `strict=True`；前面加星号可以反向拆列。
 
@@ -796,6 +1152,37 @@ print(squares)       # [0, 1, 4, 9, 16, 25]
 print(even_squares)  # [0, 4, 16]
 ```
 
+先展开第二行，不追求短，看看执行顺序：
+
+```python
+even_squares = []
+for number in range(6):
+    if number % 2 == 0:
+        square = number * number
+        even_squares.append(square)
+    print(number, even_squares)
+
+# 0 [0]
+# 1 [0]
+# 2 [0, 4]
+# 3 [0, 4]
+# 4 [0, 4, 16]
+# 5 [0, 4, 16]
+```
+
+真实处理顺序是：从 `range(6)` 取一个数 → 检查末尾的 `if` → 通过后才计算最前面的 `number * number` → 放进结果。不是先对所有数字求平方，再统一筛选。读推导式时先找 `for`，顺着 `if` 往下看，最后看开头要产出什么。
+
+“先判断，再计算”还能避开不合法的运算：
+
+```python
+values = [2, 0, 4]
+reciprocals = [1 / value for value in values if value != 0]
+print(reciprocals)  # [0.5, 0.25]
+print([x * 2 for x in []])  # []：输入为空，不执行转换表达式
+```
+
+这里 `0` 在除法发生前就被筛掉了；去掉末尾条件，运行到它时才会抛 `ZeroDivisionError`。
+
 11.2 两种 if：一个决定留不留，一个决定变成什么
 
 `for` 后面的 `if` 是筛选：不满足条件的元素不进入结果。前面的 `A if 条件 else B` 是逐项选结果：每个元素都会得到 A 或 B，不会因为分支而少一项。
@@ -804,6 +1191,21 @@ print(even_squares)  # [0, 4, 16]
 labels = ["even" if number % 2 == 0 else "odd" for number in range(5)]
 print(labels)  # ['even', 'odd', 'even', 'odd', 'even']
 ```
+
+这一种的普通循环长这样，每轮都追加一次，只是追加的内容不同：
+
+```python
+labels = []
+for number in range(5):
+    if number % 2 == 0:
+        label = "even"
+    else:
+        label = "odd"
+    labels.append(label)
+print(labels)  # ['even', 'odd', 'even', 'odd', 'even']
+```
+
+所以 `[表达式 for ... if 条件]` 里的条件回答“要不要这项”；`[A if 条件 else B for ...]` 里的条件回答“这项变成 A 还是 B”。前一种可能减少项数，后一种对每个输入都给出一项结果。
 
 11.3 多个 for：左边是外层，右边是内层
 
@@ -815,6 +1217,33 @@ print(pairs)
 ```
 
 预期输出为 `[(0, 0), (0, 1), (0, 2), (1, 0), (1, 1), (1, 2)]`。
+
+把 `for` 按从左到右的顺序逐层展开：
+
+```python
+pairs = []
+for x in range(2):
+    for y in range(3):
+        pairs.append((x, y))
+    print(x, pairs)
+
+# 0 [(0, 0), (0, 1), (0, 2)]
+# 1 [(0, 0), (0, 1), (0, 2), (1, 0), (1, 1), (1, 2)]
+```
+
+因此双层 for 不是 zip。这里每个 x 都会配所有 y，共 `2 × 3 = 6` 项；zip 则只按相同位置配对，两个长度分别为 2 和 3 的输入默认只配出 2 项。
+
+二维列表扁平化也是同样顺序：先拿到一行，再拿到该行每一个元素。空行没有元素，内层循环就执行 0 次：
+
+```python
+matrix = [[1, 2], [], [3]]
+flat = []
+for row in matrix:
+    for item in row:
+        flat.append(item)
+print(flat)  # [1, 2, 3]
+print([item for row in matrix for item in row])  # [1, 2, 3]
+```
 
 11.4 字典与集合推导式
 
@@ -828,7 +1257,23 @@ passed = {name: score for name, score in score_by_name.items() if score >= 90}
 print(passed)  # {'alice': 95}
 ```
 
+第一段字典推导式相当于先建 `score_by_name = {}`，每取到 `(name, score)` 就执行 `score_by_name[name] = score`，中间先有 `{'alice': 95}`，再变成 `{'alice': 95, 'bob': 88}`。第二段再遍历键值对，只把分数至少 90 的项写入 `passed`。
+
 若推导过程中出现重复键，后出现的值覆盖先前值。
+
+```python
+records = [("alice", 80), ("bob", 88), ("alice", 95)]
+score_by_name = {}
+for name, score in records:
+    score_by_name[name] = score
+    print(score_by_name)
+
+# {'alice': 80}
+# {'alice': 80, 'bob': 88}
+# {'alice': 95, 'bob': 88}
+```
+
+写成 `{name: score for name, score in records}` 也是同样结果，不会自动替你给 alice 求和或取平均。多个同名记录都要留下时，应把值设计成列表，而不是让新值覆盖旧值。
 
 集合推导式自动去重：
 
@@ -836,6 +1281,8 @@ print(passed)  # {'alice': 95}
 remainders = {number % 3 for number in range(10)}
 print(sorted(remainders))  # [0, 1, 2]
 ```
+
+这相当于先建 `remainders = set()`，每轮计算 `number % 3` 后调用 `remainders.add(...)`。0、1、2 分别加入后，后面的余数重复出现，不会新增元素。因此推导式前面是表达式，但结果放进列表、字典还是集合，决定了它会不会保留重复项。
 
 推导式适合一眼能看懂的转换。出现多层条件、异常处理、副作用或复杂业务规则时，普通循环更清楚。不要为了“Pythonic”把所有逻辑压成一行。
 
@@ -862,6 +1309,19 @@ print(head)  # 0
 print(body)  # [1, 2, 3, 4]
 print(tail)  # 5
 ```
+
+先把两端需要的元素留出来，剩下的都交给带星号的变量；它接到的是列表，即使来源是元组或 range。没有剩余元素时，也能接到空列表：
+
+```python
+first, *middle, last = [10, 20]
+print(first, middle, last)  # 10 [] 20
+try:
+    first, last = [10, 20, 30]
+except ValueError:
+    print("too many values to unpack")
+```
+
+没有星号时，左右数量必须一致；带一个星号可以吸收多出的项，但普通变量需要的最少项数仍要满足。比如 `first, *middle, last = [10]` 仍然会失败，因为连首尾两个位置都不够。
 
 12.2 拆字典时，默认拿到键
 
@@ -947,7 +1407,18 @@ print(len(successful))
 print({path: round(value, 1) for path, value in averages.items()})
 ```
 
+这段先按变量逐步追一次，别跳过中间两个字典：
+
+- `successful` 保留第 1、3、4 条记录，所以长度是 3。它只用来做这个计数，不会自动改变后面遍历的 `records`。
+- `paths` 去重后有 `/users` 和 `/orders` 两个路径。集合不保证输出顺序，但这里按路径取数据，先处理谁都不影响结果。
+- 外层每拿到一个 `path`，内层推导式就重新检查全部记录。处理 `/users` 时收集 `[18, 25]`，处理 `/orders` 时收集 `[92, 40]`。
+- `averages` 再拿到这些列表，分别计算 `(18 + 25) / 2 = 21.5` 和 `(92 + 40) / 2 = 66.0`。
+
+所以第一行输出 `3`，第二行字典里是 `'/users': 21.5` 和 `'/orders': 66.0`，两个键打印的先后顺序不固定。注意：平均耗时目前统计的是全部记录，包含状态码 500 的那条。如果只想统计前面筛选出的记录，后续分组就应基于 `successful`，而不是继续用 `records`。
+
 这段代码里，列表保留记录，集合去掉重复路径，字典把路径和统计结果对应起来。小数据这样写很清楚；记录很多时，每个路径都重新扫描一遍全部记录就不划算了，可以改为一次循环，用 `defaultdict(list)` 分组。先确认结果正确，再看数据量是否值得优化。
+
+空输入也值得手动推一下：`records = []` 时没有路径可遍历，`averages` 会是空字典，根本不会进入除法，因此不会除以零。非空输入里的每个路径都来自记录本身，也至少对应一条耗时。
 
 14.2 安全解析端口列表
 
@@ -964,6 +1435,19 @@ print({path: round(value, 1) for path, value in averages.items()})
 ```
 
 参考思路：先 `split(",")`，逐项 `strip()`，在 `try/except ValueError` 中转换，使用集合去重，最后 `sorted()`。
+
+每条输入会经过哪一步，可以先填这张表，再写循环：
+
+| 当前片段 | 转整数后 | 接下来怎么处理 | 已保留端口，按大小展示 |
+| --- | --- | --- | --- |
+| `"8080"` | `8080` | 在范围内，加入集合 | `[8080]` |
+| `" 443"` | `443` | 去掉空白后加入 | `[443, 8080]` |
+| `" bad"` | 转换失败 | 捕获 ValueError，跳过本项 | `[443, 8080]` |
+| `" 8080"` | `8080` | 集合里已有，不重复保留 | `[443, 8080]` |
+| `" 65536"` | `65536` | 能转换，但不在允许范围，跳过 | `[443, 8080]` |
+| `" 80"` | `80` | 在范围内，加入集合 | `[80, 443, 8080]` |
+
+这里有两种不同的失败：`bad` 是根本不能转整数，`65536` 是类型没问题、范围不合要求。两层检查都需要，不能只写一个 `int()`。完成后再试空字符串、全是错误值、重复端口和边界 `0、1、65535、65536`，确认空输入返回空列表、两端只保留合法范围。
 
 14.3 按多个条件排序
 
